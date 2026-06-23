@@ -8,6 +8,7 @@ import type { LngLat } from "@/types";
 const RAW_SRC = "trace-raw";
 const SNAP_SRC = "trace-snap";
 const PIN_SRC = "trace-pins";
+const HOVER_SRC = "trace-hover";
 
 function emptyLine() {
   return {
@@ -29,6 +30,9 @@ function addLayers(map: mapboxgl.Map) {
   }
   if (!map.getSource(PIN_SRC)) {
     map.addSource(PIN_SRC, { type: "geojson", data: emptyPoints() });
+  }
+  if (!map.getSource(HOVER_SRC)) {
+    map.addSource(HOVER_SRC, { type: "geojson", data: emptyPoints() });
   }
   if (!map.getLayer("snap-casing")) {
     map.addLayer({
@@ -86,12 +90,38 @@ function addLayers(map: mapboxgl.Map) {
       },
     });
   }
+  if (!map.getLayer("hover-halo")) {
+    map.addLayer({
+      id: "hover-halo",
+      type: "circle",
+      source: HOVER_SRC,
+      paint: {
+        "circle-radius": 11,
+        "circle-color": "#22d3ee",
+        "circle-opacity": 0.25,
+      },
+    });
+  }
+  if (!map.getLayer("hover-dot")) {
+    map.addLayer({
+      id: "hover-dot",
+      type: "circle",
+      source: HOVER_SRC,
+      paint: {
+        "circle-radius": 5,
+        "circle-color": "#22d3ee",
+        "circle-stroke-color": "#fff",
+        "circle-stroke-width": 2,
+      },
+    });
+  }
 }
 
 export default function RouteLayers({ rawPreview }: { rawPreview: LngLat[] }) {
   const map = useMap();
   const segments = useTrace((s) => s.segments);
   const stylekey = useTrace((s) => s.style);
+  const hoverPoint = useTrace((s) => s.hoverPoint);
   const installed = useRef(false);
 
   // Install layers (and reinstall when style changes)
@@ -153,6 +183,24 @@ export default function RouteLayers({ rawPreview }: { rawPreview: LngLat[] }) {
     paint();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments]);
+
+  useEffect(() => {
+    if (!installed.current) return;
+    const hoverSrc = map.getSource(HOVER_SRC) as mapboxgl.GeoJSONSource | undefined;
+    if (!hoverSrc) return;
+    hoverSrc.setData({
+      type: "FeatureCollection",
+      features: hoverPoint
+        ? [
+            {
+              type: "Feature",
+              geometry: { type: "Point", coordinates: hoverPoint },
+              properties: {},
+            },
+          ]
+        : [],
+    });
+  }, [hoverPoint, map]);
 
   useEffect(() => {
     if (!installed.current) return;

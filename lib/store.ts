@@ -13,6 +13,7 @@ type State = {
   isDrawing: boolean;
   isLoading: boolean;
   error: string | null;
+  hoverPoint: LngLat | null;
 };
 
 type Actions = {
@@ -23,6 +24,7 @@ type Actions = {
   setDrawing: (d: boolean) => void;
   setError: (e: string | null) => void;
   setLoading: (l: boolean) => void;
+  setHoverPoint: (p: LngLat | null) => void;
   addSegment: (seg: Segment) => void;
   addWaypoint: (p: LngLat, seg: Segment | null) => void;
   undo: () => void;
@@ -40,6 +42,7 @@ export const useTrace = create<State & Actions>((set) => ({
   isDrawing: false,
   isLoading: false,
   error: null,
+  hoverPoint: null,
 
   setMode: (mode) => set({ mode }),
   setActivity: (activity) => set({ activity }),
@@ -48,6 +51,7 @@ export const useTrace = create<State & Actions>((set) => ({
   setDrawing: (isDrawing) => set({ isDrawing }),
   setError: (error) => set({ error }),
   setLoading: (isLoading) => set({ isLoading }),
+  setHoverPoint: (hoverPoint) => set({ hoverPoint }),
 
   addSegment: (seg) =>
     set((s) => ({ segments: [...s.segments, seg] })),
@@ -70,7 +74,7 @@ export const useTrace = create<State & Actions>((set) => ({
       return { segments, waypoints };
     }),
 
-  clear: () => set({ segments: [], waypoints: [], error: null }),
+  clear: () => set({ segments: [], waypoints: [], error: null, hoverPoint: null }),
 
   hydrate: (s) => set(s),
 }));

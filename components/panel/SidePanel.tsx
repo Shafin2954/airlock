@@ -16,6 +16,7 @@ import {
   Moon,
 } from "lucide-react";
 import ToggleGroup from "./ToggleGroup";
+import SavedRoutes from "./SavedRoutes";
 import { useTrace, totalDistance, lastSnappedPoint, firstSnappedPoint, profileFor } from "@/lib/store";
 import { formatDistance } from "@/lib/geo/distance";
 import { fetchRoute } from "@/lib/mapbox/client";
@@ -86,7 +87,7 @@ export default function SidePanel() {
   }, [segments, state.activity, state.units, state.style]);
 
   return (
-    <aside className="pointer-events-auto absolute left-4 top-4 z-10 flex w-[330px] max-w-[calc(100vw-2rem)] flex-col gap-4 rounded-2xl border border-zinc-200/80 bg-white/90 p-4 shadow-xl backdrop-blur dark:border-zinc-700/60 dark:bg-zinc-900/85">
+    <aside className="pointer-events-auto absolute left-4 top-4 z-10 flex max-h-[calc(100dvh-2rem)] w-[330px] max-w-[calc(100vw-2rem)] flex-col gap-4 overflow-y-auto rounded-2xl border border-zinc-200/80 bg-white/90 p-4 shadow-xl backdrop-blur dark:border-zinc-700/60 dark:bg-zinc-900/85">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="grid h-7 w-7 place-items-center rounded-lg bg-gradient-to-br from-cyan-400 to-blue-600 text-white">
@@ -179,6 +180,8 @@ export default function SidePanel() {
           {state.error}
         </div>
       )}
+
+      <SavedRoutes />
 
       <footer className="border-t border-zinc-200 pt-3 text-[10.5px] leading-relaxed text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
         {state.mode === "freehand" ? (

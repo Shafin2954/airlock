@@ -6,6 +6,7 @@ import RouteLayers from "./map/RouteLayers";
 import WaypointController from "./map/WaypointController";
 import FreehandController from "./map/FreehandController";
 import SidePanel from "./panel/SidePanel";
+import ElevationProfile from "./panel/ElevationProfile";
 import { useTrace } from "@/lib/store";
 import { fromHash } from "@/lib/geo/hash";
 import type { LngLat } from "@/types";
@@ -39,6 +40,7 @@ export default function MapShell() {
         <FreehandController onPreviewChange={handlePreview} />
       </MapCanvas>
       <SidePanel />
+      <ElevationProfile />
     </div>
   );
 }

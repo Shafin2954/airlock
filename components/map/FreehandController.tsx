@@ -21,7 +21,14 @@ export default function FreehandController({
   const map = useMap();
   const mode = useTrace((s) => s.mode);
   const activity = useTrace((s) => s.activity);
-  const [hint, setHint] = useState(false);
+  // Reset the "dismissed" flag whenever the mode changes (render-phase pattern).
+  const [prevMode, setPrevMode] = useState(mode);
+  const [dismissed, setDismissed] = useState(false);
+  if (prevMode !== mode) {
+    setPrevMode(mode);
+    setDismissed(false);
+  }
+  const showHint = mode === "freehand" && !dismissed;
 
   const bufferRef = useRef<LngLat[]>([]);
   const lastPxRef = useRef<{ x: number; y: number } | null>(null);
@@ -30,7 +37,6 @@ export default function FreehandController({
 
   useEffect(() => {
     if (mode !== "freehand") return;
-    setHint(true);
     const canvas = map.getCanvas();
     canvas.style.cursor = "crosshair";
     map.dragPan.disable();
@@ -96,7 +102,7 @@ export default function FreehandController({
       if (e.button !== 0 && e.pointerType === "mouse") return;
       drawingRef.current = true;
       useTrace.setState({ isDrawing: true });
-      setHint(false);
+      setDismissed(true);
       const rect = canvas.getBoundingClientRect();
       const px = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       const lngLat = map.unproject([px.x, px.y]);
@@ -153,11 +159,10 @@ export default function FreehandController({
       map.doubleClickZoom.enable();
       map.touchZoomRotate.enable();
       reset();
-      setHint(false);
     };
   }, [map, mode, activity, onPreviewChange]);
 
-  if (mode !== "freehand" || !hint) return null;
+  if (!showHint) return null;
   return (
     <div className="pointer-events-none absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-zinc-900/85 px-3.5 py-1.5 text-xs font-medium text-white shadow-lg backdrop-blur">
       Click and drag to trace your route
