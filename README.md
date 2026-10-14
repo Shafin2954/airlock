@@ -162,6 +162,10 @@ Ideas, roughly in order. PRs welcome.
 
 [`cloak/`](cloak/) is a Chromium extension: a decoy new-tab page with a hidden, AES-encrypted set of links. Type your passphrase in the search box to reveal them; type anything else and it just searches. Read its [README](cloak/README.md), especially the honest **“How safe is this, really?”** threat model.
 
+### Cloak Vault
+
+[`cloak-vault/`](cloak-vault/) is a desktop launcher (Python) that goes further: it opens a **blank decoy Chrome** by default and keeps your **real Chrome profile encrypted at rest** (scrypt + AES-256-GCM), decrypting it only while you use it. Unlike an extension it can give you an empty `chrome://extensions` and keep the real profile out of Chrome's profile picker. Honest threat model in its [README](cloak-vault/README.md): it stops a nosy non-forensic person, not a skilled attacker.
+
 ## License
 
 [MIT](LICENSE). If Airlock kept a key out of a chat log, a ⭐ helps other people find it.
