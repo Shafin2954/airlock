@@ -152,9 +152,15 @@ Ideas, roughly in order. PRs welcome.
 - [ ] Context Map: load a public GitHub repo by URL
 - [ ] More detectors. [Open an issue](https://github.com/Shafin2954/anything/issues/new?template=detector.md) with a format and a fake example.
 
-## Also in this repo: PeekBar
+## Also in this repo
+
+### PeekBar
 
 [`peekbar/`](peekbar/) is a separate Chromium extension: Firefox-style reveal-on-hover tabs and address bar in full screen (F11), with tabs-only / address-only presets. See its [README](peekbar/README.md).
+
+### Cloak
+
+[`cloak/`](cloak/) is a Chromium extension: a decoy new-tab page with a hidden, AES-encrypted set of links. Type your passphrase in the search box to reveal them; type anything else and it just searches. Read its [README](cloak/README.md), especially the honest **“How safe is this, really?”** threat model.
 
 ## License
 
