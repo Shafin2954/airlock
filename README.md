@@ -152,6 +152,10 @@ Ideas, roughly in order. PRs welcome.
 - [ ] Context Map: load a public GitHub repo by URL
 - [ ] More detectors. [Open an issue](https://github.com/Shafin2954/anything/issues/new?template=detector.md) with a format and a fake example.
 
+## Also in this repo: PeekBar
+
+[`peekbar/`](peekbar/) is a separate Chromium extension: Firefox-style reveal-on-hover tabs and address bar in full screen (F11), with tabs-only / address-only presets. See its [README](peekbar/README.md).
+
 ## License
 
 [MIT](LICENSE). If Airlock kept a key out of a chat log, a ⭐ helps other people find it.
