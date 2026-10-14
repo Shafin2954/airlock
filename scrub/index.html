@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scrub — redact secrets before you paste into AI</title>
+<meta name="description" content="Paste logs, configs or code. Scrub swaps API keys, passwords, emails and IPs for placeholders, then puts the real values back into the AI's answer. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c2410c' stroke-width='2.4' stroke-linecap='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='5'/%3E%3Cpath d='M12 3v18M8 9v6M16 9v6'/%3E%3C/svg%3E">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'">
+<link rel="stylesheet" href="../assets/airlock.css">
+<style>
+  main { max-width: 1500px; margin: 0 auto; padding: 18px 20px 40px; }
+  .intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .intro h1 { margin: 0; font-size: 22px; letter-spacing: -0.02em; }
+  .intro p { margin: 3px 0 0; color: var(--ink-2); max-width: 760px; }
+  .steps { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-3); flex-wrap: wrap; }
+  .steps b { color: var(--ink); font-weight: 600; }
+  .steps .arrow { opacity: .6; }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 320px; gap: 14px; align-items: start; }
+  @media (max-width: 1180px) { .layout { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .side { grid-column: 1 / -1; } }
+  @media (max-width: 760px) { main { padding: 14px 16px 32px; } .layout { grid-template-columns: minmax(0, 1fr); } }
+
+  .editor { display: flex; flex-direction: column; min-height: 0; }
+  .editor textarea, .editor .out {
+    border: 0; border-radius: 0 0 var(--radius) var(--radius); box-shadow: none !important;
+    height: clamp(320px, calc(100vh - 250px), 900px); width: 100%; padding: 12px 14px; margin: 0;
+    font: 13px/1.6 var(--mono); background: var(--panel); color: var(--ink); resize: none; overflow: auto;
+    white-space: pre-wrap; word-break: break-word; tab-size: 4;
+  }
+  .editor .out:empty::before { content: attr(data-empty); color: var(--ink-3); font-family: var(--sans); }
+  .panel-head .grow { flex: 1; }
+  .stat { font-size: 12.5px; color: var(--ink-3); }
+
+  .ph { border-radius: 4px; padding: 0 2px; font-weight: 600; cursor: help; }
+  .ph.secret { background: var(--secret-soft); color: var(--secret); }
+  .ph.pii { background: var(--pii-soft); color: var(--pii); }
+  .ph.custom { background: var(--custom-soft); color: var(--custom); }
+  .ph.restored { background: var(--ok-soft); color: var(--ok); font-weight: 500; }
+  .ph.flash { outline: 2px solid var(--accent); }
+
+  .side { display: flex; flex-direction: column; gap: 14px; }
+  .findings { max-height: 360px; overflow: auto; }
+  .finding { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .finding:last-child { border-bottom: 0; }
+  .finding .ph { cursor: pointer; font-family: var(--mono); font-size: 12px; }
+  .finding .lab { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .finding .val { grid-column: 2 / 3; font-family: var(--mono); font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .finding .n { color: var(--ink-3); font-size: 12px; }
+  .finding button { grid-row: 1 / 3; grid-column: 3; }
+  .empty { padding: 18px 14px; color: var(--ink-3); font-size: 13.5px; text-align: center; }
+  .summary { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .summary .chip.secret { background: var(--secret-soft); color: var(--secret); }
+  .summary .chip.pii { background: var(--pii-soft); color: var(--pii); }
+  .summary .chip.custom { background: var(--custom-soft); color: var(--custom); }
+
+  details.rules > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 12px; }
+  details.rules > summary::-webkit-details-marker { display: none; }
+  details.rules > summary::after { content: "▸"; margin-left: auto; color: var(--ink-3); transition: transform .15s; }
+  details.rules[open] > summary::after { transform: rotate(90deg); }
+  .rules-body { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 14px; }
+  .rule-group h3 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-3); }
+  .rule-group .switch { padding: 3px 0; font-size: 13.5px; }
+  .rules-body textarea { width: 100%; min-height: 64px; font: 13px/1.5 var(--mono); }
+  .allow-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .allow-list .chip button { border: 0; background: none; color: inherit; cursor: pointer; padding: 0 0 0 2px; font-size: 14px; line-height: 1; }
+
+  .restore-note { font-size: 13px; color: var(--ink-2); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header data-airlock-topbar data-tool="scrub" data-base="../"></header>
+
+<main>
+  <div class="intro">
+    <div>
+      <h1>Scrub</h1>
+      <p>Paste logs, configs, stack traces or code. API keys, passwords, emails and IPs become placeholders like <code>[EMAIL_1]</code>. Paste the AI's answer back into <b>Restore</b> to get your real values back.</p>
+    </div>
+    <div class="seg" role="tablist" aria-label="Mode">
+      <button role="tab" id="tab-redact" aria-selected="true" aria-controls="view-redact">1 · Redact</button>
+      <button role="tab" id="tab-restore" aria-selected="false" aria-controls="view-restore">2 · Restore</button>
+    </div>
+  </div>
+
+  <!-- ------------------------------------------------------------ REDACT -->
+  <section id="view-redact" role="tabpanel" aria-labelledby="tab-redact">
+    <div class="layout">
+      <div class="panel editor">
+        <div class="panel-head">
+          <span class="panel-title">Original</span><span class="grow"></span>
+          <button class="btn small ghost" id="sample" type="button">Load sample</button>
+          <button class="btn small ghost" id="clear" type="button">Clear</button>
+        </div>
+        <label class="visually-hidden" for="input">Text to redact</label>
+        <textarea id="input" spellcheck="false" autocomplete="off" placeholder="Paste text that might contain secrets or personal data…&#10;&#10;Everything stays in this tab. Nothing is sent anywhere."></textarea>
+      </div>
+
+      <div class="panel editor">
+        <div class="panel-head">
+          <span class="panel-title">Safe to share</span><span class="grow"></span>
+          <span class="stat" id="out-stat"></span>
+          <button class="btn small primary" id="copy-out" type="button" title="Copy (Ctrl/⌘ + Enter)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy
+          </button>
+        </div>
+        <div class="out" id="output" tabindex="0" aria-live="polite" data-empty="Redacted text appears here as you type."></div>
+      </div>
+
+      <aside class="side">
+        <div class="panel">
+          <div class="panel-head">
+            <span class="panel-title">Detected</span><span class="grow"></span>
+            <button class="btn small ghost" id="next-msg" type="button" title="Clear the input but keep placeholder numbering and the restore map, for a follow-up message in the same chat">Next message</button>
+          </div>
+          <div class="summary" id="summary" hidden></div>
+          <div class="findings" id="findings"><div class="empty">Nothing yet. Paste something, or try the sample.</div></div>
+        </div>
+
+        <div class="panel">
+          <details class="rules" id="rules">
+            <summary><span class="panel-title">Rules</span><span class="chip" id="rules-count"></span></summary>
+            <div class="rules-body">
+              <div>
+                <label class="small" for="terms"><b>Also hide these words</b> <span class="muted">— one per line: company, client, project codenames…</span></label>
+                <textarea id="terms" spellcheck="false" placeholder="Acme Corp&#10;Project Bluebird"></textarea>
+              </div>
+              <div class="allow-wrap" hidden>
+                <div class="small" style="margin-bottom:6px"><b>Never hide</b> <span class="muted">— marked “not sensitive”</span></div>
+                <div class="allow-list" id="allow-list"></div>
+              </div>
+              <label class="switch"><input type="checkbox" id="keep-private" checked> Keep private &amp; loopback IPs (10.x, 192.168.x, ::1)</label>
+              <div class="rule-group" id="group-secret"><h3>Secrets</h3></div>
+              <div class="rule-group" id="group-pii"><h3>Personal data</h3></div>
+            </div>
+          </details>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ RESTORE -->
+  <section id="view-restore" role="tabpanel" aria-labelledby="tab-restore" hidden>
+    <div class="layout">
+      <div class="panel editor">
+        <div class="panel-head">
+          <span class="panel-title">AI's reply</span><span class="grow"></span>
+          <button class="btn small ghost" id="clear-reply" type="button">Clear</button>
+        </div>
+        <label class="visually-hidden" for="reply">AI reply containing placeholders</label>
+        <textarea id="reply" spellcheck="false" placeholder="Paste the answer you got back. Placeholders like [EMAIL_1] or [SECRET_2] will be swapped for your real values."></textarea>
+      </div>
+      <div class="panel editor">
+        <div class="panel-head">
+          <span class="panel-title">With your values</span><span class="grow"></span>
+          <span class="stat" id="restore-stat"></span>
+          <button class="btn small primary" id="copy-restored" type="button">Copy</button>
+        </div>
+        <div class="out" id="restored" tabindex="0" data-empty="Restored text appears here."></div>
+      </div>
+      <aside class="side">
+        <div class="panel">
+          <div class="panel-head"><span class="panel-title">Restore map</span><span class="grow"></span><span class="chip" id="map-count">0 values</span></div>
+          <div class="restore-note">The map lives only in this tab's memory. Close the tab and it's gone — download it if you need it later (it contains your real values, so treat it like a secret).</div>
+          <div style="display:flex; gap:8px; padding:12px; flex-wrap:wrap">
+            <button class="btn small" id="download-map" type="button">Download map</button>
+            <label class="btn small" for="import-map">Import map…</label>
+            <input type="file" id="import-map" accept=".json,application/json" class="visually-hidden">
+            <button class="btn small ghost" id="reset-map" type="button">Forget all</button>
+          </div>
+          <div class="restore-note" style="border-top:1px solid var(--line); border-bottom:0">Works with the CLI too: <code>scrub restore --map map.json</code></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<script src="../assets/airlock.js"></script>
+<script src="core.js"></script>
+<script>
+(function () {
+  "use strict";
+  const S = window.ScrubCore;
+  const { esc, copy, toast, download, debounce } = window.Airlock;
+  const $ = (id) => document.getElementById(id);
+
+  // committed = placeholders from earlier messages in this session; current = committed + this paste
+  let committed = S.createVault();
+  let current = S.createVault();
+  let last = { text: "", findings: [], segments: [] };
+  const allow = new Set();
+  const enabled = {};
+
+  // ------------------------------------------------------------ rules UI
+  for (const r of S.rules()) {
+    const g = $("group-" + r.kind);
+    if (!g) continue;
+    const lab = document.createElement("label");
+    lab.className = "switch";
+    lab.innerHTML = '<input type="checkbox" data-rule="' + r.id + '"' + (r.defaultOn ? " checked" : "") + "> " + esc(r.label);
+    g.appendChild(lab);
+  }
+  function countRules() {
+    const all = document.querySelectorAll("[data-rule]");
+    const on = document.querySelectorAll("[data-rule]:checked");
+    $("rules-count").textContent = on.length + " / " + all.length + " on";
+  }
+  countRules();
+  document.querySelectorAll("[data-rule]").forEach((cb) =>
+    cb.addEventListener("change", () => {
+      enabled[cb.dataset.rule] = cb.checked;
+      countRules();
+      run();
+    })
+  );
+  $("keep-private").addEventListener("change", run);
+  $("terms").addEventListener("input", debounce(run, 200));
+
+  function options() {
+    return {
+      enabled,
+      keepPrivateIPs: $("keep-private").checked,
+      customTerms: $("terms").value.split(/\n/).map((s) => s.trim()).filter(Boolean),
+      allowlist: [...allow],
+    };
+  }
+
+  // ------------------------------------------------------------ redact
+  function run() {
+    const text = $("input").value;
+    current = S.createVault(JSON.parse(JSON.stringify(committed)));
+    last = S.redact(text, options(), current);
+    renderOutput();
+    renderFindings();
+    renderMap();
+    renderRestore();
+  }
+
+  function renderOutput() {
+    const out = $("output");
+    const t = last.text;
+    let html = "";
+    let pos = 0;
+    for (const s of last.segments) {
+      html += esc(t.slice(pos, s.start));
+      const f = s.finding;
+      html += '<span class="ph ' + f.kind + '" data-ph="' + esc(f.placeholder) + '" title="' + esc(f.label + " · " + S.mask(f.value)) + '">' + esc(f.placeholder) + "</span>";
+      pos = s.end;
+    }
+    html += esc(t.slice(pos));
+    out.innerHTML = html;
+    const n = last.findings.length;
+    $("out-stat").textContent = $("input").value ? (n ? n + " hidden" : "nothing sensitive found") : "";
+  }
+
+  function renderFindings() {
+    const box = $("findings");
+    const sum = $("summary");
+    if (!last.findings.length) {
+      box.innerHTML = '<div class="empty">' + ($("input").value ? "Nothing sensitive found with the current rules." : "Nothing yet. Paste something, or try the sample.") + "</div>";
+      sum.hidden = true;
+      return;
+    }
+    const groups = new Map();
+    for (const f of last.findings) {
+      const g = groups.get(f.placeholder) || { f, n: 0 };
+      g.n++;
+      groups.set(f.placeholder, g);
+    }
+    const kinds = { secret: 0, pii: 0, custom: 0 };
+    for (const g of groups.values()) kinds[g.f.kind]++;
+    sum.hidden = false;
+    sum.innerHTML =
+      (kinds.secret ? '<span class="chip secret">' + kinds.secret + " secret" + (kinds.secret > 1 ? "s" : "") + "</span>" : "") +
+      (kinds.pii ? '<span class="chip pii">' + kinds.pii + " personal</span>" : "") +
+      (kinds.custom ? '<span class="chip custom">' + kinds.custom + " custom</span>" : "");
+    box.innerHTML = [...groups.values()]
+      .map(({ f, n }) =>
+        '<div class="finding">' +
+          '<span class="ph ' + f.kind + '" data-jump="' + esc(f.placeholder) + '" title="Show in output">' + esc(f.placeholder) + "</span>" +
+          '<span class="lab">' + esc(f.label) + (n > 1 ? ' <span class="n">×' + n + "</span>" : "") + "</span>" +
+          '<button class="btn small ghost" data-allow="' + esc(f.placeholder) + '" title="Not sensitive: never hide this value">Keep</button>' +
+          '<span class="val">' + esc(S.mask(f.value)) + "</span>" +
+        "</div>"
+      )
+      .join("");
+  }
+
+  $("findings").addEventListener("click", (e) => {
+    const allowBtn = e.target.closest("[data-allow]");
+    if (allowBtn) {
+      const value = current.map[allowBtn.dataset.allow];
+      if (value != null) {
+        allow.add(value);
+        renderAllow();
+        run();
+        toast("Won't hide that value");
+      }
+      return;
+    }
+    const jump = e.target.closest("[data-jump]");
+    if (jump) {
+      const el = $("output").querySelector('[data-ph="' + CSS.escape(jump.dataset.jump) + '"]');
+      if (el) {
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.add("flash");
+        setTimeout(() => el.classList.remove("flash"), 1200);
+      }
+    }
+  });
+
+  function renderAllow() {
+    const wrap = document.querySelector(".allow-wrap");
+    wrap.hidden = allow.size === 0;
+    $("allow-list").innerHTML = [...allow]
+      .map((v, i) => '<span class="chip">' + esc(S.mask(v)) + '<button type="button" data-unallow="' + i + '" aria-label="Hide this value again">×</button></span>')
+      .join("");
+  }
+  $("allow-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-unallow]");
+    if (!b) return;
+    allow.delete([...allow][+b.dataset.unallow]);
+    renderAllow();
+    run();
+  });
+
+  $("input").addEventListener("input", debounce(run, 120));
+  $("clear").addEventListener("click", () => {
+    $("input").value = "";
+    run();
+    $("input").focus();
+  });
+  $("copy-out").addEventListener("click", () => copy(last.text, last.findings.length ? "Copied — " + last.findings.length + " values hidden" : "Copied"));
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !$("view-redact").hidden) {
+      e.preventDefault();
+      $("copy-out").click();
+    }
+  });
+  $("next-msg").addEventListener("click", () => {
+    committed = S.createVault(JSON.parse(JSON.stringify(current)));
+    $("input").value = "";
+    run();
+    $("input").focus();
+    toast("Numbering kept for the next message");
+  });
+
+  // Fake credentials are assembled at runtime so secret scanners don't flag this file.
+  const j = (...p) => p.join("");
+  const SAMPLE = [
+    "$ npm run deploy",
+    "> deploying to prod-eu (203.0.113.42) as jane.doe@acmecorp.io",
+    "Error: 401 Unauthorized from https://api.acmecorp.io/v2/releases",
+    "    at upload (/Users/janedoe/code/acme/scripts/deploy.js:88:11)",
+    "",
+    "# .env",
+    "DATABASE_URL=postgres://deploy:" + j("Tr0ub4dor", "-and-3") + "@db.internal.acmecorp.io:5432/app",
+    "OPENAI_API_KEY=" + j("sk-", "proj-", "q8Hc2LZtN5vR7xWm1Kp4", "Yd9Bf6Gs3Ja0Ue2Io7Tn"),
+    "STRIPE_SECRET_KEY=" + j("sk_", "live_", "51Hx7Qm2Lk9Pz4Rt8Vb3Nc6"),
+    "GITHUB_TOKEN=" + j("ghp_", "R7tY2uI9oP4aS6dF1gH8jK3lZ5xC0vB2nM4q"),
+    "SESSION_SECRET=" + j("f9a8", "Kd2Lq7Zx4Vb1Nm6Pw3Rt"),
+    "DEBUG=false",
+    "",
+    "curl -H \"Authorization: Bearer " + j("eyJhbGciOiJIUzI1NiJ9", ".eyJzdWIiOiJqYW5lIn0", ".Xm2Lq9Zk4Rt7Vb1Nc8Hp3") + "\" \\",
+    "     https://api.acmecorp.io/v2/me",
+    "",
+    "Ping from office laptop 3c:22:fb:91:aa:07 at 198.51.100.7 (gateway 192.168.1.1)",
+  ].join("\n");
+
+  $("sample").addEventListener("click", () => {
+    $("input").value = SAMPLE;
+    if (!$("terms").value.trim()) $("terms").value = "acmecorp\nAcme";
+    run();
+  });
+
+  // ------------------------------------------------------------ restore
+  function renderMap() {
+    const n = Object.keys(current.map).length;
+    $("map-count").textContent = n + " value" + (n === 1 ? "" : "s");
+  }
+
+  function renderRestore() {
+    const text = $("reply").value;
+    const phs = Object.keys(current.map);
+    let count = 0;
+    let html = esc(text);
+    if (phs.length && text) {
+      const lookup = {};
+      for (const p of phs) lookup[p.toUpperCase()] = current.map[p];
+      const re = new RegExp(phs.sort((a, b) => b.length - a.length).map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
+      let out = "";
+      let pos = 0;
+      let m;
+      while ((m = re.exec(text))) {
+        out += esc(text.slice(pos, m.index)) + '<span class="ph restored" title="' + esc(m[0]) + '">' + esc(lookup[m[0].toUpperCase()]) + "</span>";
+        pos = m.index + m[0].length;
+        count++;
+      }
+      html = out + esc(text.slice(pos));
+    }
+    $("restored").innerHTML = html;
+    $("restore-stat").textContent = text ? count + " restored" : "";
+  }
+  $("reply").addEventListener("input", debounce(renderRestore, 100));
+  $("clear-reply").addEventListener("click", () => {
+    $("reply").value = "";
+    renderRestore();
+  });
+  $("copy-restored").addEventListener("click", () => copy(S.restore($("reply").value, current).text));
+  $("download-map").addEventListener("click", () => {
+    if (!Object.keys(current.map).length) return toast("Nothing to download yet");
+    download("scrub-map.json", JSON.stringify(current, null, 2) + "\n", "application/json");
+  });
+  $("import-map").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (!data || typeof data.map !== "object") throw new Error("not a scrub map");
+      const merged = S.createVault(committed);
+      for (const [ph, v] of Object.entries(data.map)) if (!(ph in merged.map)) merged.map[ph] = v;
+      for (const [k, n] of Object.entries(data.counters || {})) merged.counters[k] = Math.max(merged.counters[k] || 0, n);
+      committed = merged;
+      run();
+      toast("Imported " + Object.keys(data.map).length + " values");
+    } catch (err) {
+      toast("Couldn't read that map: " + err.message);
+    }
+    e.target.value = "";
+  });
+  $("reset-map").addEventListener("click", () => {
+    committed = S.createVault();
+    $("input").value = "";
+    $("reply").value = "";
+    run();
+    toast("Forgot all values");
+  });
+
+  // ------------------------------------------------------------ tabs
+  function show(which) {
+    const r = which === "redact";
+    $("tab-redact").setAttribute("aria-selected", r);
+    $("tab-restore").setAttribute("aria-selected", !r);
+    $("view-redact").hidden = !r;
+    $("view-restore").hidden = r;
+    (r ? $("input") : $("reply")).focus();
+  }
+  $("tab-redact").addEventListener("click", () => show("redact"));
+  $("tab-restore").addEventListener("click", () => show("restore"));
+
+  run();
+})();
+</script>
+</body>
+</html>

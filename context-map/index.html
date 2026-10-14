@@ -1,0 +1,707 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Map — see your codebase in tokens</title>
+<meta name="description" content="Drop a folder and see where your tokens go. A treemap of your codebase sized by tokens, a context-window budget, and one-click packing into a prompt, with secrets scrubbed. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c2410c' stroke-width='2.4' stroke-linecap='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='5'/%3E%3Cpath d='M12 3v18M8 9v6M16 9v6'/%3E%3C/svg%3E">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'">
+<link rel="stylesheet" href="../assets/airlock.css">
+<style>
+  :root {
+    --c0: #f59e0b; --c1: #3b82f6; --c2: #10b981; --c3: #ec4899; --c4: #8b5cf6;
+    --c5: #06b6d4; --c6: #ef4444; --c7: #84cc16; --c8: #f97316; --c9: #6366f1; --cx: #a8a29e;
+    --tile-ink: #1c1b18; --frame: var(--panel-2);
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tile-ink: #0d0d0c; --frame: #22211e; } }
+  :root[data-theme="dark"] { --tile-ink: #0d0d0c; --frame: #22211e; }
+
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+
+  /* ---------- empty state */
+  .landing { max-width: 880px; margin: 0 auto; padding: 48px 20px 40px; width: 100%; }
+  .landing h1 { font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.03em; margin: 0 0 8px; }
+  .landing .lead { color: var(--ink-2); font-size: 17px; margin: 0 0 26px; max-width: 680px; }
+  .dropzone { min-height: 280px; }
+  .feature-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+  .feature-row div { font-size: 14px; color: var(--ink-2); }
+  .feature-row b { display: block; color: var(--ink); margin-bottom: 2px; }
+  @media (max-width: 700px) { .feature-row { grid-template-columns: 1fr; } }
+  .opts { display: flex; gap: 18px; justify-content: center; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--ink-2); }
+  .opts input[type="number"] { width: 72px; padding: 3px 6px; }
+
+  .progress { margin: 22px auto 0; max-width: 420px; display: none; }
+  .progress.show { display: block; }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .1s; }
+
+  /* ---------- workspace */
+  .work { display: none; flex: 1; min-height: 0; padding: 14px 20px 20px; gap: 14px; grid-template-columns: minmax(0, 1fr) 360px; }
+  .work.show { display: grid; }
+  @media (max-width: 980px) { .work.show { grid-template-columns: minmax(0, 1fr); } }
+  @media (min-width: 981px) {
+    body.loaded { height: 100vh; overflow: hidden; }
+    .sidebar { overflow: auto; }
+  }
+  @media (max-width: 760px) { .work { padding: 12px 16px 20px; } }
+
+  .mapcol { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .crumbs { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 14px; min-height: 34px; margin-bottom: 8px; }
+  .crumbs button { border: 0; background: none; color: var(--ink-2); font: inherit; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+  .crumbs button:hover { background: var(--panel-2); color: var(--ink); }
+  .crumbs button:last-of-type { color: var(--ink); font-weight: 600; }
+  .crumbs .slash { color: var(--ink-3); }
+  .crumbs .grow { flex: 1; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .treemap { position: relative; flex: 1; min-height: 420px; border-radius: var(--radius); overflow: hidden; background: var(--frame); border: 1px solid var(--line); user-select: none; }
+  .t { position: absolute; overflow: hidden; box-sizing: border-box; }
+  .t.dir { background: var(--frame); border: 1px solid var(--line-2); border-radius: 4px; }
+  .t.dir > .h { position: absolute; left: 0; right: 0; top: 0; height: 16px; padding: 0 5px; font: 600 11px/16px var(--sans); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: zoom-in; }
+  .t.dir > .h:hover { color: var(--ink); background: var(--panel-2); }
+  .t.f { border: 1px solid var(--frame); border-radius: 3px; cursor: pointer; color: var(--tile-ink); padding: 3px 5px; font: 500 11px/1.25 var(--sans); }
+  .t.f:hover { box-shadow: inset 0 0 0 2px var(--ink), inset 0 0 0 999px rgba(255,255,255,.12); }
+  .t.f .n { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .t.f .k { display: block; opacity: .75; font-size: 10.5px; }
+  .t.f.off { background-image: repeating-linear-gradient(135deg, rgba(0,0,0,.18) 0 4px, transparent 4px 8px) !important; opacity: .38; }
+  .t.f.secret::after { content: ""; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 2px var(--panel); }
+
+  .tip { position: fixed; z-index: 50; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 12.5px; padding: 7px 10px; border-radius: 8px; max-width: 360px; box-shadow: var(--shadow); display: none; }
+  .tip b { font-family: var(--mono); font-weight: 600; word-break: break-all; }
+  .tip .m { opacity: .7; }
+
+  /* ---------- sidebar */
+  .sidebar { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  .budget-num { display: flex; align-items: baseline; gap: 6px; padding: 14px 14px 6px; }
+  .budget-num .big { font-size: 30px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .budget-num .of { color: var(--ink-3); font-size: 15px; }
+  .meter { margin: 0 14px; height: 10px; border-radius: 999px; background: var(--panel-2); overflow: hidden; position: relative; }
+  .meter > i { position: absolute; inset: 0 auto 0 0; background: var(--ok); border-radius: 999px; transition: width .2s, background .2s; }
+  .meter.warn > i { background: var(--warn); }
+  .meter.over > i { background: var(--bad); }
+  .budget-row { display: flex; align-items: center; gap: 8px; padding: 12px 14px 14px; flex-wrap: wrap; }
+  .budget-row select { padding: 5px 8px; }
+  .budget-msg { font-size: 13px; color: var(--ink-2); padding: 0 14px; }
+  .budget-msg.over { color: var(--bad); }
+  .out-body { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .out-body textarea { width: 100%; min-height: 54px; font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row .grow { flex: 1; }
+  .warnbox { font-size: 13px; background: var(--bad-soft); color: var(--bad); padding: 8px 10px; border-radius: 8px; }
+  .warnbox.ok { background: var(--ok-soft); color: var(--ok); }
+
+  .files { display: flex; flex-direction: column; min-height: 260px; flex: 1; }
+  .files .panel-head input { flex: 1; min-width: 0; padding: 5px 9px; font-size: 13px; }
+  .flist { overflow: auto; flex: 1; max-height: 420px; }
+  .fi { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; padding: 5px 12px; font-size: 12.5px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .fi:hover { background: var(--panel-2); }
+  .fi input { margin: 0; accent-color: var(--accent); }
+  .fi .p { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+  .fi .p bdi { direction: ltr; }
+  .fi .tk { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .fi .tag { font-size: 10.5px; padding: 0 5px; border-radius: 4px; margin-left: 4px; }
+  .tag.noise { background: var(--panel-2); color: var(--ink-3); }
+  .tag.sens, .tag.sec { background: var(--bad-soft); color: var(--bad); }
+  .more { padding: 10px; text-align: center; }
+  .skipped { font-size: 12.5px; color: var(--ink-3); padding: 8px 12px; border-top: 1px solid var(--line); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header data-airlock-topbar data-tool="context-map" data-base="../"></header>
+
+<main>
+  <!-- ------------------------------------------------------------ EMPTY -->
+  <section class="landing" id="landing">
+    <h1>See your codebase in tokens.</h1>
+    <p class="lead">Drop a project folder to get a treemap sized by tokens, check it against a context window, then copy exactly the files you want as one prompt. Secrets are scrubbed on the way out.</p>
+
+    <div class="dropzone" id="drop">
+      <div>
+        <svg class="big" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5 12 11l2.5 2.5"/></svg>
+        <h2>Drop a folder here</h2>
+        <div class="muted">or pick one. Files are read in this tab and never uploaded.</div>
+        <div class="actions">
+          <button class="btn primary" id="pick" type="button">Choose folder…</button>
+          <label class="btn" for="pick-input">Upload folder (fallback)</label>
+          <input id="pick-input" type="file" webkitdirectory directory multiple class="visually-hidden">
+        </div>
+        <div class="opts">
+          <label class="switch"><input type="checkbox" id="opt-gitignore" checked> Respect .gitignore</label>
+          <label>Skip files over <input type="number" id="opt-max" value="512" min="16" step="16"> KB</label>
+        </div>
+      </div>
+    </div>
+    <div class="progress" id="progress"><div class="bar"><i></i></div><div class="small muted" id="progress-text" style="margin-top:6px;text-align:center"></div></div>
+
+    <div class="feature-row">
+      <div><b>Where do tokens go?</b>Lockfiles, fixtures and generated code light up instantly. Click any tile to drop it.</div>
+      <div><b>Fit the window</b>Pick a budget (128K, 200K, 1M…) and auto-trim the biggest files until it fits.</div>
+      <div><b>Paste-ready</b>XML or Markdown with a directory tree, secrets replaced by placeholders, <code>.env</code> left out.</div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ WORK -->
+  <section class="work" id="work">
+    <div class="mapcol">
+      <div class="crumbs" id="crumbs"></div>
+      <div class="treemap" id="treemap" role="img" aria-label="Treemap of files sized by estimated tokens"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Context budget</span><span class="grow" style="flex:1"></span><button class="btn small ghost" id="reset" type="button">Open another…</button></div>
+        <div class="budget-num"><span class="big" id="used">0</span><span class="of" id="of">/ 200K tokens</span></div>
+        <div class="meter" id="meter"><i></i></div>
+        <div class="budget-row">
+          <label class="small" for="budget">Window</label>
+          <select id="budget">
+            <option value="32000">32K</option>
+            <option value="128000">128K</option>
+            <option value="200000" selected>200K</option>
+            <option value="256000">256K</option>
+            <option value="400000">400K</option>
+            <option value="1000000">1M</option>
+            <option value="2000000">2M</option>
+          </select>
+          <span class="grow" style="flex:1"></span>
+          <button class="btn small" id="fit" type="button" title="Exclude the largest files until the selection fits">Fit to budget</button>
+        </div>
+        <div class="budget-msg" id="budget-msg" style="padding-bottom:12px"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Pack as prompt</span></div>
+        <div class="out-body">
+          <div class="row">
+            <div class="seg" role="group" aria-label="Format">
+              <button type="button" data-format="xml" aria-pressed="true">XML</button>
+              <button type="button" data-format="markdown" aria-pressed="false">Markdown</button>
+            </div>
+            <span class="grow"></span>
+            <label class="switch small"><input type="checkbox" id="opt-tree" checked> Tree</label>
+          </div>
+          <label class="switch small"><input type="checkbox" id="opt-scrub" checked> Replace secrets with placeholders</label>
+          <div class="warnbox" id="secret-warn" hidden></div>
+          <textarea id="instructions" placeholder="Optional instructions to put at the top, e.g. “Review this for race conditions.”"></textarea>
+          <div class="row">
+            <button class="btn primary" id="copy" type="button">Copy prompt</button>
+            <button class="btn" id="download" type="button">Download .txt</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel files">
+        <div class="panel-head">
+          <input type="search" id="filter" placeholder="Filter files…" aria-label="Filter files">
+          <button class="btn small ghost" id="all-on" type="button" title="Include all listed">All</button>
+          <button class="btn small ghost" id="all-off" type="button" title="Exclude all listed">None</button>
+        </div>
+        <div class="flist" id="flist"></div>
+        <div class="skipped" id="skipped"></div>
+      </div>
+    </aside>
+  </section>
+</main>
+<div class="tip" id="tip"></div>
+
+<script src="../assets/airlock.js"></script>
+<script src="../scrub/core.js"></script>
+<script src="core.js"></script>
+<script>
+(function () {
+  "use strict";
+  const C = window.ContextMapCore;
+  const S = window.ScrubCore;
+  const { esc, copy, toast, download, debounce } = window.Airlock;
+  const $ = (id) => document.getElementById(id);
+  const fmt = C.formatTokens;
+
+  const state = {
+    rootName: "",
+    files: [], // {path, text, tokens, included, noise, sensitive, secrets, ext}
+    skipped: { binary: 0, large: 0, ignored: 0, dirs: 0, unreadable: 0 },
+    zoom: "",
+    format: "xml",
+    tree: null,
+    colors: new Map(),
+    showAll: false,
+  };
+
+  try {
+    const b = localStorage.getItem("airlock-cm-budget");
+    if (b && [...$("budget").options].some((o) => o.value === b)) $("budget").value = b;
+  } catch {}
+
+  // ------------------------------------------------------------ sources
+  // Normalise the three ways a folder can arrive into {name, kind, node, list(), file()}.
+
+  function fromHandle(h) {
+    return {
+      name: h.name,
+      kind: h.kind === "directory" ? "dir" : "file",
+      async list() {
+        const out = [];
+        for await (const c of h.values()) out.push(fromHandle(c));
+        return out;
+      },
+      file: () => h.getFile(),
+    };
+  }
+
+  function fromEntry(e) {
+    return {
+      name: e.name,
+      kind: e.isDirectory ? "dir" : "file",
+      async list() {
+        const reader = e.createReader();
+        const out = [];
+        for (;;) {
+          const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+          if (!batch.length) break;
+          for (const c of batch) out.push(fromEntry(c));
+        }
+        return out;
+      },
+      file: () => new Promise((res, rej) => e.file(res, rej)),
+    };
+  }
+
+  function fromFileList(list) {
+    const root = { name: "", kind: "dir", children: new Map() };
+    for (const f of list) {
+      const parts = (f.webkitRelativePath || f.name).split("/");
+      if (!root.name && parts.length > 1) root.name = parts[0];
+      let cur = root;
+      for (let i = parts.length > 1 ? 1 : 0; i < parts.length - 1; i++) {
+        let d = cur.children.get(parts[i]);
+        if (!d) cur.children.set(parts[i], (d = { name: parts[i], kind: "dir", children: new Map() }));
+        cur = d;
+      }
+      cur.children.set(f.name, { name: f.name, kind: "file", f });
+    }
+    const wrap = (n) => ({
+      name: n.name,
+      kind: n.kind,
+      list: async () => [...n.children.values()].map(wrap),
+      file: async () => n.f,
+    });
+    return wrap(root);
+  }
+
+  // ------------------------------------------------------------ load
+
+  async function load(rootSrc) {
+    const useGitignore = $("opt-gitignore").checked;
+    const maxBytes = Math.max(16, +$("opt-max").value || 512) * 1024;
+    const skipped = { binary: 0, large: 0, ignored: 0, dirs: 0, unreadable: 0 };
+    const candidates = [];
+    const prog = $("progress");
+    const bar = prog.querySelector("i");
+    prog.classList.add("show");
+    $("progress-text").textContent = "Scanning folders…";
+    bar.style.width = "4%";
+
+    async function walk(dir, rel, stack) {
+      let kids;
+      try {
+        kids = await dir.list();
+      } catch {
+        skipped.unreadable++;
+        return;
+      }
+      if (useGitignore) {
+        const gi = kids.find((k) => k.kind === "file" && k.name === ".gitignore");
+        if (gi) {
+          try {
+            stack = stack.concat(C.compileGitignore(await (await gi.file()).text(), rel));
+          } catch {}
+        }
+      }
+      for (const k of kids) {
+        const p = rel ? rel + "/" + k.name : k.name;
+        if (k.kind === "dir") {
+          if (C.IGNORED_DIRS.has(k.name)) { skipped.dirs++; continue; }
+          if (useGitignore && C.isIgnored(stack, p, true)) { skipped.ignored++; continue; }
+          await walk(k, p, stack);
+        } else {
+          if (k.name === ".DS_Store") continue;
+          if (useGitignore && C.isIgnored(stack, p, false)) { skipped.ignored++; continue; }
+          if (C.isBinaryPath(p)) { skipped.binary++; continue; }
+          candidates.push({ path: p, src: k });
+        }
+        if (candidates.length % 200 === 0) $("progress-text").textContent = "Found " + candidates.length + " files…";
+      }
+    }
+    await walk(rootSrc, "", []);
+
+    const files = [];
+    let done = 0;
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    async function worker() {
+      while (candidates.length) {
+        const c = candidates.pop();
+        try {
+          const file = await c.src.file();
+          if (file.size > maxBytes) skipped.large++;
+          else {
+            const buf = new Uint8Array(await file.arrayBuffer());
+            if (C.looksBinary(buf)) skipped.binary++;
+            else {
+              const text = decoder.decode(buf).replace(/^﻿/, "");
+              const noise = C.isNoise(c.path);
+              const sensitive = C.isSensitive(c.path);
+              const secrets = S.scan(text, { kinds: ["secret"] }).length;
+              const ext = C.extOf(c.path);
+              files.push({ path: c.path, text, tokens: C.estimateTokens(text), included: !noise && !sensitive, noise, sensitive, secrets, ext: ext || c.path.split("/").pop(), bare: !ext });
+            }
+          }
+        } catch (err) {
+          skipped.unreadable++;
+          console.warn("Context Map: couldn't read", c.path, err && err.message);
+        }
+        done++;
+        if (done % 25 === 0) {
+          const total = done + candidates.length;
+          bar.style.width = Math.round(5 + (95 * done) / Math.max(1, total)) + "%";
+          $("progress-text").textContent = "Reading " + done + " / " + total + " files…";
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: 12 }, worker));
+    prog.classList.remove("show");
+    bar.style.width = "0";
+
+    if (!files.length) {
+      toast("No readable text files found in that folder");
+      return;
+    }
+    files.sort((a, b) => a.path.localeCompare(b.path));
+    state.rootName = rootSrc.name || "project";
+    state.files = files;
+    state.skipped = skipped;
+    state.zoom = "";
+    assignColors();
+    $("landing").hidden = true;
+    $("work").classList.add("show");
+    document.body.classList.add("loaded");
+    rebuild();
+  }
+
+  // ------------------------------------------------------------ colours
+
+  function assignColors() {
+    const byExt = new Map();
+    for (const f of state.files) byExt.set(f.ext, (byExt.get(f.ext) || 0) + f.tokens);
+    const top = [...byExt.entries()].sort((a, b) => b[1] - a[1]);
+    state.colors = new Map(top.slice(0, 10).map(([e], i) => [e, "var(--c" + i + ")"]));
+    state.bareNames = new Set(state.files.filter((f) => f.bare).map((f) => f.ext));
+    state.extTotals = top;
+  }
+  const colorOf = (f) => state.colors.get(f.ext) || "var(--cx)";
+
+  // ------------------------------------------------------------ render
+
+  function rebuild() {
+    state.tree = C.buildTree(state.files, state.rootName);
+    renderMap();
+    renderSide();
+  }
+
+  function nodeAt(path) {
+    if (!path) return state.tree;
+    let cur = state.tree;
+    for (const part of path.split("/")) {
+      cur = cur.children && cur.children.find((c) => c.dir && c.name === part);
+      if (!cur) return state.tree;
+    }
+    return cur;
+  }
+
+  function renderMap() {
+    const el = $("treemap");
+    const w = el.clientWidth, h = el.clientHeight;
+    if (!w || !h) return;
+    const root = nodeAt(state.zoom);
+    const rects = C.layoutTree(root, w, h, { pad: 2, header: 16, minHeader: 46 });
+    const total = state.tree.tokens || 1;
+    let html = "";
+    for (const r of rects) {
+      if (r.depth === 0) continue;
+      if (r.w < 2 || r.h < 2) continue;
+      const n = r.node;
+      const style = "left:" + r.x.toFixed(1) + "px;top:" + r.y.toFixed(1) + "px;width:" + r.w.toFixed(1) + "px;height:" + r.h.toFixed(1) + "px";
+      if (n.dir) {
+        const head = r.w > 46 && r.h > 32;
+        html += '<div class="t dir" style="' + style + '">' + (head ? '<div class="h" data-zoom="' + esc(n.path) + '" title="Zoom into ' + esc(n.path) + '">' + esc(n.name) + "/ · " + fmt(n.tokens) + "</div>" : "") + "</div>";
+      } else {
+        const f = n.file;
+        const label = r.w > 44 && r.h > 18;
+        const kLabel = r.w > 44 && r.h > 32;
+        html += '<div class="t f' + (f.included ? "" : " off") + (f.secrets ? " secret" : "") + '" data-path="' + esc(f.path) + '" style="' + style + ";background:" + colorOf(f) + '">' +
+          (label ? '<span class="n">' + esc(n.name) + "</span>" : "") + (kLabel ? '<span class="k">' + fmt(f.tokens) + " · " + ((f.tokens / total) * 100).toFixed(1) + "%</span>" : "") + "</div>";
+      }
+    }
+    el.innerHTML = html;
+
+    // breadcrumbs
+    const parts = state.zoom ? state.zoom.split("/") : [];
+    let crumbs = '<button type="button" data-zoom="">' + esc(state.rootName) + "</button>";
+    let acc = "";
+    for (const p of parts) {
+      acc = acc ? acc + "/" + p : p;
+      crumbs += '<span class="slash">/</span><button type="button" data-zoom="' + esc(acc) + '">' + esc(p) + "</button>";
+    }
+    crumbs += '<span class="grow"></span><span class="small muted">' + fmt(root.tokens) + " tokens · click a tile to include/exclude · click a folder name to zoom</span>";
+    $("crumbs").innerHTML = crumbs;
+
+    $("legend").innerHTML = state.extTotals
+      .slice(0, 10)
+      .map(([e, t]) => '<span><i style="background:' + state.colors.get(e) + '"></i>' + esc(state.bareNames.has(e) ? e : "." + e) + ' <span class="muted">' + fmt(t) + "</span></span>")
+      .join("") + (state.extTotals.length > 10 ? '<span><i style="background:var(--cx)"></i>other</span>' : "");
+  }
+
+  function selection() {
+    return state.files.filter((f) => f.included);
+  }
+
+  function overhead(sel) {
+    // wrapper tags/headers per file + directory tree lines
+    return sel.length * 12 + ($("opt-tree").checked ? sel.length * 7 : 0) + C.estimateTokens($("instructions").value);
+  }
+
+  function renderSide() {
+    const sel = selection();
+    const used = sel.reduce((s, f) => s + f.tokens, 0) + (sel.length ? overhead(sel) : 0);
+    const budget = +$("budget").value;
+    const pct = used / budget;
+    $("used").textContent = "~" + fmt(used);
+    $("of").textContent = "/ " + fmt(budget) + " tokens";
+    const meter = $("meter");
+    meter.querySelector("i").style.width = Math.min(100, pct * 100) + "%";
+    meter.className = "meter" + (pct > 1 ? " over" : pct > 0.85 ? " warn" : "");
+    const msg = $("budget-msg");
+    msg.className = "budget-msg" + (pct > 1 ? " over" : "");
+    msg.textContent =
+      sel.length + " of " + state.files.length + " files selected. " +
+      (pct > 1 ? "Over by ~" + fmt(used - budget) + " — trim or use Fit to budget." : "~" + fmt(budget - used) + " left for the conversation and the answer.");
+
+    const secretFiles = sel.filter((f) => f.secrets);
+    const warn = $("secret-warn");
+    if (secretFiles.length) {
+      const n = secretFiles.reduce((s, f) => s + f.secrets, 0);
+      warn.hidden = false;
+      warn.className = "warnbox" + ($("opt-scrub").checked ? " ok" : "");
+      warn.textContent = $("opt-scrub").checked
+        ? n + " secret" + (n > 1 ? "s" : "") + " in " + secretFiles.length + " file" + (secretFiles.length > 1 ? "s" : "") + " will be replaced with placeholders."
+        : "Warning: " + n + " secret" + (n > 1 ? "s" : "") + " in " + secretFiles.length + " selected file" + (secretFiles.length > 1 ? "s" : "") + " will be copied as-is.";
+    } else warn.hidden = true;
+
+    renderList();
+    const sk = state.skipped;
+    const bits = [];
+    if (sk.dirs) bits.push(sk.dirs + " dependency/build folders");
+    if (sk.ignored) bits.push(sk.ignored + " .gitignored");
+    if (sk.binary) bits.push(sk.binary + " binary");
+    if (sk.large) bits.push(sk.large + " too large");
+    if (sk.unreadable) bits.push(sk.unreadable + " unreadable");
+    $("skipped").textContent = bits.length ? "Skipped: " + bits.join(", ") + "." : "";
+  }
+
+  function renderList() {
+    const q = $("filter").value.trim().toLowerCase();
+    const list = state.files.filter((f) => !q || f.path.toLowerCase().includes(q)).sort((a, b) => b.tokens - a.tokens);
+    const limit = state.showAll ? list.length : 250;
+    $("flist").innerHTML =
+      list
+        .slice(0, limit)
+        .map((f) =>
+          '<label class="fi" title="' + esc(f.path) + '"><input type="checkbox" data-file="' + esc(f.path) + '"' + (f.included ? " checked" : "") + '>' +
+            '<span class="p"><bdi>' + esc(f.path) + "</bdi></span>" +
+            '<span class="tk">' + (f.sensitive ? '<span class="tag sens">sensitive</span>' : "") + (f.secrets ? '<span class="tag sec">secrets</span>' : "") + (f.noise ? '<span class="tag noise">generated</span>' : "") + " " + fmt(f.tokens) + "</span></label>"
+        )
+        .join("") + (list.length > limit ? '<div class="more"><button class="btn small" type="button" id="show-all">Show all ' + list.length + "</button></div>" : "");
+  }
+
+  const byPath = (p) => state.files.find((f) => f.path === p);
+
+  function toggle(paths, value) {
+    for (const p of paths) {
+      const f = byPath(p);
+      if (f) f.included = value === undefined ? !f.included : value;
+    }
+    renderMap();
+    renderSide();
+  }
+
+  // ------------------------------------------------------------ events
+
+  $("treemap").addEventListener("click", (e) => {
+    const z = e.target.closest("[data-zoom]");
+    if (z) {
+      state.zoom = z.dataset.zoom;
+      renderMap();
+      return;
+    }
+    const t = e.target.closest("[data-path]");
+    if (t) toggle([t.dataset.path]);
+  });
+  $("crumbs").addEventListener("click", (e) => {
+    const z = e.target.closest("[data-zoom]");
+    if (z) {
+      state.zoom = z.dataset.zoom;
+      renderMap();
+    }
+  });
+
+  const tip = $("tip");
+  $("treemap").addEventListener("mousemove", (e) => {
+    const t = e.target.closest("[data-path]");
+    if (!t) {
+      tip.style.display = "none";
+      return;
+    }
+    const f = byPath(t.dataset.path);
+    const total = state.tree.tokens || 1;
+    tip.innerHTML = "<b>" + esc(f.path) + '</b><br>~' + f.tokens.toLocaleString() + ' tokens <span class="m">· ' + ((f.tokens / total) * 100).toFixed(2) + "% of repo · " + (f.text.length / 1024).toFixed(1) + " KB</span>" +
+      (f.secrets ? "<br>⚠ " + f.secrets + " secret" + (f.secrets > 1 ? "s" : "") + " detected" : "") + (f.sensitive ? "<br>⚠ credentials file — excluded by default" : "") + (f.noise ? '<br><span class="m">generated / lockfile — excluded by default</span>' : "") +
+      '<br><span class="m">' + (f.included ? "Included — click to exclude" : "Excluded — click to include") + "</span>";
+    tip.style.display = "block";
+    const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8);
+    const y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8);
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  });
+  $("treemap").addEventListener("mouseleave", () => (tip.style.display = "none"));
+
+  $("flist").addEventListener("change", (e) => {
+    const cb = e.target.closest("[data-file]");
+    if (cb) toggle([cb.dataset.file], cb.checked);
+  });
+  $("flist").addEventListener("click", (e) => {
+    if (e.target.id === "show-all") {
+      state.showAll = true;
+      renderList();
+    }
+  });
+  $("filter").addEventListener("input", debounce(renderList, 100));
+  const visiblePaths = () => {
+    const q = $("filter").value.trim().toLowerCase();
+    return state.files.filter((f) => !q || f.path.toLowerCase().includes(q)).map((f) => f.path);
+  };
+  $("all-on").addEventListener("click", () => toggle(visiblePaths(), true));
+  $("all-off").addEventListener("click", () => toggle(visiblePaths(), false));
+
+  $("budget").addEventListener("change", () => {
+    try {
+      localStorage.setItem("airlock-cm-budget", $("budget").value);
+    } catch {}
+    renderSide();
+  });
+  $("fit").addEventListener("click", () => {
+    const sel = selection();
+    const r = C.fitToBudget(state.files, +$("budget").value, overhead(sel));
+    renderMap();
+    renderSide();
+    toast(r.dropped.length ? "Excluded " + r.dropped.length + " largest file" + (r.dropped.length > 1 ? "s" : "") : "Already fits");
+  });
+  ["opt-tree", "opt-scrub"].forEach((id) => $(id).addEventListener("change", renderSide));
+  $("instructions").addEventListener("input", debounce(renderSide, 200));
+  document.querySelectorAll("[data-format]").forEach((b) =>
+    b.addEventListener("click", () => {
+      state.format = b.dataset.format;
+      document.querySelectorAll("[data-format]").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    })
+  );
+
+  function buildPrompt() {
+    let sel = selection();
+    let redacted = 0;
+    if ($("opt-scrub").checked) {
+      const vault = S.createVault();
+      sel = sel.map((f) => {
+        if (!f.secrets) return f;
+        const r = S.redact(f.text, { kinds: ["secret"] }, vault);
+        redacted += r.findings.length;
+        return { path: f.path, text: r.text };
+      });
+    }
+    const text = C.pack(sel, { format: state.format, tree: $("opt-tree").checked, rootName: state.rootName, instructions: $("instructions").value });
+    return { text, count: sel.length, redacted };
+  }
+  $("copy").addEventListener("click", () => {
+    const p = buildPrompt();
+    if (!p.count) return toast("Select at least one file");
+    copy(p.text, "Copied " + p.count + " files · ~" + fmt(C.estimateTokens(p.text)) + " tokens" + (p.redacted ? " · " + p.redacted + " secrets scrubbed" : ""));
+  });
+  $("download").addEventListener("click", () => {
+    const p = buildPrompt();
+    if (!p.count) return toast("Select at least one file");
+    download((state.rootName || "context") + (state.format === "xml" ? ".xml.txt" : ".md"), p.text);
+  });
+  $("reset").addEventListener("click", () => {
+    $("work").classList.remove("show");
+    document.body.classList.remove("loaded");
+    $("landing").hidden = false;
+    state.files = [];
+    $("pick-input").value = "";
+  });
+
+  new ResizeObserver(debounce(() => state.tree && renderMap(), 60)).observe($("treemap"));
+
+  // ------------------------------------------------------------ pickers
+
+  $("pick").addEventListener("click", async () => {
+    if (window.showDirectoryPicker) {
+      try {
+        const h = await window.showDirectoryPicker({ mode: "read" });
+        await load(fromHandle(h));
+      } catch (e) {
+        if (e.name !== "AbortError") toast("Couldn't open folder: " + e.message);
+      }
+    } else $("pick-input").click();
+  });
+  $("pick-input").addEventListener("change", (e) => {
+    if (e.target.files.length) load(fromFileList(e.target.files));
+  });
+
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((t) =>
+    document.addEventListener(t, (e) => {
+      e.preventDefault();
+      if ($("landing").hidden) return;
+      drop.classList.add("over");
+    })
+  );
+  ["dragleave", "drop"].forEach((t) => document.addEventListener(t, (e) => {
+    e.preventDefault();
+    if (t === "dragleave" && e.relatedTarget) return;
+    drop.classList.remove("over");
+  }));
+  document.addEventListener("drop", async (e) => {
+    const items = [...(e.dataTransfer.items || [])].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (!items.length) return;
+    if (items.length === 1 && items[0].isDirectory) return load(fromEntry(items[0]));
+    // several files / folders dropped: wrap them in a virtual root
+    const kids = items.map(fromEntry);
+    load({ name: "dropped", kind: "dir", list: async () => kids });
+  });
+
+  // test hook: lets the e2e suite load an in-memory folder
+  window.__contextMapLoad = (files, name) => {
+    const list = files.map((f) => {
+      const file = new File([f.text], f.path.split("/").pop());
+      Object.defineProperty(file, "webkitRelativePath", { value: (name || "demo") + "/" + f.path });
+      return file;
+    });
+    return load(fromFileList(list));
+  };
+})();
+</script>
+</body>
+</html>

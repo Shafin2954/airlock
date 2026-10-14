@@ -1,0 +1,713 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSONL Lens — explore huge JSONL files in your browser</title>
+<meta name="description" content="Open multi-gigabyte JSONL / NDJSON logs, datasets and agent transcripts. Inferred schema, one-click facets, JavaScript filters, stats, and export. Runs entirely in your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c2410c' stroke-width='2.4' stroke-linecap='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='5'/%3E%3Cpath d='M12 3v18M8 9v6M16 9v6'/%3E%3C/svg%3E">
+<!-- 'unsafe-eval' powers the filter box (your own expressions, evaluated locally). connect-src 'none' still blocks any network access. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; form-action 'none'">
+<link rel="stylesheet" href="../assets/airlock.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .landing { max-width: 880px; margin: 0 auto; padding: 48px 20px 40px; width: 100%; }
+  .landing h1 { font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.03em; margin: 0 0 8px; }
+  .landing .lead { color: var(--ink-2); font-size: 17px; margin: 0 0 26px; max-width: 680px; }
+  .dropzone { min-height: 260px; }
+  .progress { margin: 22px auto 0; max-width: 420px; display: none; }
+  .progress.show { display: block; }
+  .bar { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); }
+  .examples { margin-top: 26px; font-size: 14px; color: var(--ink-2); }
+  .examples code { font-size: 12.5px; background: var(--panel-2); padding: 1px 6px; border-radius: 5px; }
+  .examples li { margin: 4px 0; }
+
+  .work { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .work.show { display: flex; }
+  body.loaded { height: 100vh; overflow: hidden; }
+  @media (max-width: 980px) { body.loaded { height: auto; overflow: auto; } }
+
+  .qbar { display: flex; gap: 8px; align-items: center; padding: 10px 20px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  .qbar .file { font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .qbar input { font: 13px var(--mono); padding: 6px 10px; }
+  #search { width: 200px; }
+  #expr { flex: 1; min-width: 240px; }
+  #expr.err { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+  .count { font-size: 13px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .count b { color: var(--ink); }
+  .exprerr { width: 100%; font: 12px var(--mono); color: var(--bad); }
+
+  .cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr) 420px; }
+  .cols.nodetail { grid-template-columns: 280px minmax(0, 1fr) 0; }
+  .cols.nodetail .detail { display: none; }
+  @media (max-width: 1200px) { .cols { grid-template-columns: 240px minmax(0, 1fr) 360px; } .cols.nodetail { grid-template-columns: 240px minmax(0, 1fr) 0; } }
+  @media (max-width: 980px) { .cols, .cols.nodetail { grid-template-columns: minmax(0, 1fr); } .fields { max-height: 300px; } .tablewrap { height: 60vh; } }
+
+  /* fields */
+  .fields { border-right: 1px solid var(--line); overflow: auto; background: var(--panel); }
+  .fields h2, .detail h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); margin: 0; padding: 12px 14px 8px; display: flex; align-items: center; gap: 8px; }
+  .field { padding: 6px 14px; cursor: pointer; border-left: 3px solid transparent; }
+  .field:hover { background: var(--panel-2); }
+  .field.col { border-left-color: var(--accent); }
+  .field.open { background: var(--panel-2); }
+  .field .top { display: flex; align-items: center; gap: 6px; font: 12.5px var(--mono); }
+  .field .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .field .types { display: flex; gap: 3px; }
+  .ty { font: 600 9.5px var(--sans); text-transform: uppercase; padding: 1px 4px; border-radius: 3px; background: var(--panel-2); color: var(--ink-3); }
+  .ty.string { color: #0f766e; } .ty.number { color: #1d4ed8; } .ty.boolean { color: #a16207; } .ty.object, .ty.array { color: #7c3aed; } .ty.null { color: var(--ink-3); }
+  .cov { height: 3px; background: var(--panel-2); border-radius: 2px; margin-top: 5px; overflow: hidden; }
+  .cov i { display: block; height: 100%; background: var(--line-2); }
+  .facet { padding: 6px 14px 12px 17px; background: var(--panel-2); font-size: 12.5px; }
+  .facet .fv { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 3px 6px; border-radius: 5px; cursor: pointer; position: relative; overflow: hidden; }
+  .facet .fv:hover { background: var(--panel); }
+  .facet .fv .bg { position: absolute; inset: 0 auto 0 0; background: var(--accent-soft); z-index: 0; }
+  .facet .fv span { position: relative; z-index: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+  .facet .fv .c { color: var(--ink-3); }
+  .facet .acts { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .stats { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font: 12px var(--mono); margin-top: 6px; }
+  .stats dt { color: var(--ink-3); }
+  .stats dd { margin: 0; text-align: right; }
+  .hist { display: flex; align-items: flex-end; gap: 1px; height: 46px; margin-top: 8px; }
+  .hist i { flex: 1; background: var(--accent); opacity: .75; min-height: 1px; border-radius: 1px 1px 0 0; }
+
+  /* table */
+  .tablewrap { position: relative; overflow: auto; background: var(--bg); }
+  .thead { position: sticky; top: 0; z-index: 3; display: flex; background: var(--panel); border-bottom: 1px solid var(--line); min-width: max-content; }
+  .th, .td { flex: none; padding: 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .th { height: 32px; font: 600 12px/32px var(--mono); color: var(--ink-2); cursor: pointer; border-right: 1px solid var(--line); user-select: none; }
+  .th:hover { color: var(--ink); }
+  .th.sorted::after { content: " ↓"; } .th.sorted.asc::after { content: " ↑"; }
+  .rows { position: relative; min-width: max-content; }
+  .tr { position: absolute; left: 0; right: 0; display: flex; height: 28px; font: 12.5px/27px var(--mono); border-bottom: 1px solid var(--line); cursor: pointer; min-width: max-content; }
+  .tr:hover { background: var(--panel-2); }
+  .tr.sel { background: var(--accent-soft); }
+  .td.idx { color: var(--ink-3); text-align: right; }
+  .td.num { text-align: right; color: #1d4ed8; }
+  .td.nul { color: var(--ink-3); }
+  .td.bool { color: #a16207; }
+  .td.bad { color: var(--bad); }
+  .noresult { padding: 40px; text-align: center; color: var(--ink-3); }
+
+  /* detail */
+  .detail { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .detail .dh { display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 0; border-bottom: 1px solid var(--line); }
+  .detail .dh h2 { padding: 4px 14px; flex: 1; }
+  .tree { flex: 1; overflow: auto; padding: 10px 14px 20px; font: 12.5px/1.65 var(--mono); }
+  .tree details { margin-left: 14px; }
+  .tree details > summary { margin-left: -14px; cursor: pointer; list-style: none; }
+  .tree details > summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--ink-3); transition: transform .1s; }
+  .tree details[open] > summary::before { transform: rotate(90deg); }
+  .tree summary::-webkit-details-marker { display: none; }
+  .tree .kv { white-space: pre-wrap; word-break: break-word; }
+  .tree .k { color: var(--pii); cursor: copy; }
+  .tree .s { color: #0f766e; } .tree .n { color: #1d4ed8; } .tree .b { color: #a16207; } .tree .z { color: var(--ink-3); }
+  .tree .meta { color: var(--ink-3); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tree .s, :root:not([data-theme="light"]) .ty.string { color: #5eead4; } :root:not([data-theme="light"]) .tree .n, :root:not([data-theme="light"]) .td.num, :root:not([data-theme="light"]) .ty.number { color: #93c5fd; } :root:not([data-theme="light"]) .tree .b, :root:not([data-theme="light"]) .td.bool { color: #fcd34d; } }
+  :root[data-theme="dark"] .tree .s, :root[data-theme="dark"] .ty.string { color: #5eead4; } :root[data-theme="dark"] .tree .n, :root[data-theme="dark"] .td.num, :root[data-theme="dark"] .ty.number { color: #93c5fd; } :root[data-theme="dark"] .tree .b, :root[data-theme="dark"] .td.bool { color: #fcd34d; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header data-airlock-topbar data-tool="jsonl-lens" data-base="../"></header>
+
+<main>
+  <section class="landing" id="landing">
+    <h1>Open the JSONL file nothing else will.</h1>
+    <p class="lead">Logs, eval results, fine-tuning datasets, agent transcripts. JSONL Lens streams the file, infers its schema, and lets you slice it with facets and plain JavaScript. Nothing leaves your machine.</p>
+    <div class="dropzone" id="drop">
+      <div>
+        <svg class="big" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h1M9 17h6M13 13h2"/></svg>
+        <h2>Drop a .jsonl, .ndjson or .json file</h2>
+        <div class="muted">Hundreds of MB is fine. It's read in this tab, never uploaded.</div>
+        <div class="actions">
+          <label class="btn primary" for="file">Open file…</label>
+          <input type="file" id="file" accept=".jsonl,.ndjson,.json,.log,.txt,application/json,application/x-ndjson" class="visually-hidden">
+          <button class="btn" id="sample" type="button">Try 20,000 sample API logs</button>
+        </div>
+      </div>
+    </div>
+    <div class="progress" id="progress"><div class="bar"><i></i></div><div class="small muted" id="progress-text" style="margin-top:6px;text-align:center"></div></div>
+    <ul class="examples">
+      <li>Filter with JavaScript: <code>r.status &gt;= 500 &amp;&amp; r.latency_ms &gt; 800</code></li>
+      <li>Reach into nested data: <code>r.message?.content?.some(c =&gt; c.type === "tool_use")</code></li>
+      <li>Click any field for top values, stats and a histogram. Click a value to filter by it.</li>
+    </ul>
+  </section>
+
+  <section class="work" id="work">
+    <div class="qbar">
+      <span class="file" id="fname"></span>
+      <input type="search" id="search" placeholder="Text search…" aria-label="Text search" spellcheck="false">
+      <input type="text" id="expr" placeholder='Filter: r.level === "error" && r.latency_ms > 500   (Enter)' aria-label="Filter expression" spellcheck="false" autocomplete="off">
+      <span class="count" id="count"></span>
+      <button class="btn small" id="export" type="button" title="Download matching records as .jsonl">Export</button>
+      <button class="btn small ghost" id="close" type="button">Open another…</button>
+      <div class="exprerr" id="exprerr" hidden></div>
+    </div>
+    <div class="cols nodetail" id="cols">
+      <aside class="fields" id="fields" aria-label="Fields"></aside>
+      <div class="tablewrap" id="tablewrap" tabindex="0" aria-label="Records">
+        <div class="thead" id="thead"></div>
+        <div class="rows" id="rows"></div>
+      </div>
+      <aside class="detail" aria-label="Record">
+        <div class="dh">
+          <h2 id="dtitle">Record</h2>
+          <button class="btn small ghost" id="prev" type="button" title="Previous (k / ↑)">↑</button>
+          <button class="btn small ghost" id="next" type="button" title="Next (j / ↓)">↓</button>
+          <button class="btn small" id="copyrec" type="button">Copy JSON</button>
+          <button class="btn small ghost" id="closedetail" type="button" aria-label="Close record">✕</button>
+        </div>
+        <div class="tree" id="tree"></div>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<script src="../assets/airlock.js"></script>
+<script src="core.js"></script>
+<script>
+(function () {
+  "use strict";
+  const L = window.JsonlLensCore;
+  const { esc, copy, toast, download, debounce } = window.Airlock;
+  const $ = (id) => document.getElementById(id);
+  const ROW = 28;
+
+  const st = {
+    name: "",
+    lines: [], // raw JSON text per record
+    objs: null, // parsed records, kept when the file is small enough
+    bad: 0,
+    schema: [],
+    view: new Int32Array(0),
+    cols: [],
+    sort: null, // {path, dir}
+    sel: -1, // index into view
+    openField: null,
+  };
+
+  const parse = (i) => {
+    if (st.objs) return st.objs[i];
+    try {
+      return JSON.parse(st.lines[i]);
+    } catch {
+      return undefined;
+    }
+  };
+
+  // ------------------------------------------------------------ load
+
+  const yieldUI = () => new Promise((r) => setTimeout(r, 0));
+
+  async function loadFile(file) {
+    const prog = $("progress");
+    const bar = prog.querySelector("i");
+    prog.classList.add("show");
+    const lines = [];
+    let bytes = 0;
+    let firstChar = null;
+    const sp = L.lineSplitter((l) => {
+      if (l.trim()) lines.push(l);
+    });
+    const reader = file.stream().pipeThrough(new TextDecoderStream()).getReader();
+    let lastPaint = 0;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (firstChar === null) firstChar = value.trimStart()[0] || null;
+      bytes += value.length;
+      sp.write(value);
+      if (performance.now() - lastPaint > 80) {
+        lastPaint = performance.now();
+        bar.style.width = Math.min(100, (bytes / Math.max(1, file.size)) * 100).toFixed(1) + "%";
+        $("progress-text").textContent = "Reading… " + lines.length.toLocaleString() + " lines";
+        await yieldUI();
+      }
+    }
+    sp.end();
+
+    // a single JSON array (or one pretty-printed object) instead of JSONL
+    if (firstChar === "[" || (firstChar === "{" && lines.length > 1 && !isJson(lines[0]))) {
+      try {
+        const data = JSON.parse(lines.join("\n"));
+        const arr = Array.isArray(data) ? data : [data];
+        lines.length = 0;
+        for (const x of arr) lines.push(JSON.stringify(x));
+      } catch {}
+    }
+    await ingest(lines, file.name, file.size);
+    prog.classList.remove("show");
+  }
+
+  function isJson(s) {
+    try {
+      JSON.parse(s);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function ingest(lines, name, size) {
+    const keep = size < 80 * 1024 * 1024;
+    const objs = keep ? new Array(lines.length) : null;
+    const sample = [];
+    const SAMPLE = 5000;
+    const stride = Math.max(1, Math.floor(lines.length / SAMPLE));
+    let bad = 0;
+    const bar = $("progress").querySelector("i");
+    for (let i = 0; i < lines.length; i++) {
+      let o;
+      try {
+        o = JSON.parse(lines[i]);
+      } catch {
+        bad++;
+        o = undefined;
+      }
+      if (objs) objs[i] = o;
+      if (o !== undefined && i % stride === 0 && sample.length < SAMPLE) sample.push(o);
+      if (i % 5000 === 4999) {
+        bar.style.width = ((i / lines.length) * 100).toFixed(1) + "%";
+        $("progress-text").textContent = "Parsing… " + i.toLocaleString() + " / " + lines.length.toLocaleString();
+        await yieldUI();
+      }
+    }
+    Object.assign(st, { name, lines, objs, bad, sort: null, sel: -1, openField: null });
+    widthCache.clear();
+    st.schema = L.inferSchema(sample);
+    st.cols = pickColumns(st.schema);
+    st.view = Int32Array.from({ length: lines.length }, (_, i) => i);
+    $("search").value = "";
+    $("expr").value = "";
+    $("fname").textContent = name;
+    $("fname").title = name + " · " + (size / 1048576).toFixed(1) + " MB";
+    $("landing").hidden = true;
+    $("work").classList.add("show");
+    document.body.classList.add("loaded");
+    renderFields();
+    renderTable();
+    renderCount();
+    showDetail(-1);
+  }
+
+  function pickColumns(schema) {
+    const scalar = schema.filter((f) => !f.inArray && !f.types.object && !f.types.array && f.coverage > 0.05);
+    scalar.sort((a, b) => b.coverage - a.coverage || a.path.length - b.path.length);
+    const top = scalar.filter((f) => f.path.length === 1).slice(0, 7);
+    if (top.length < 4) top.push(...scalar.filter((f) => f.path.length > 1).slice(0, 7 - top.length));
+    // keep the file's own key order for readability
+    return schema.filter((f) => top.includes(f)).map((f) => f.path);
+  }
+
+  // ------------------------------------------------------------ filter
+
+  let filterToken = 0;
+  async function applyFilter() {
+    const token = ++filterToken;
+    const text = $("search").value.trim().toLowerCase();
+    const expr = $("expr").value;
+    const { fn, error } = L.compileFilter(expr);
+    const errBox = $("exprerr");
+    $("expr").classList.toggle("err", !!error);
+    errBox.hidden = !error;
+    errBox.textContent = error ? "Filter error: " + error : "";
+    if (error) return;
+    const n = st.lines.length;
+    const out = new Int32Array(n);
+    let k = 0;
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) {
+      if (text && !st.lines[i].toLowerCase().includes(text)) continue;
+      if (fn) {
+        const o = parse(i);
+        if (o === undefined || !fn(o)) continue;
+      }
+      out[k++] = i;
+      if ((i & 8191) === 8191 && performance.now() - t0 > 60) {
+        $("count").innerHTML = "Filtering… " + Math.round((i / n) * 100) + "%";
+        await yieldUI();
+        if (token !== filterToken) return;
+      }
+    }
+    st.view = out.slice(0, k);
+    if (st.sort) sortView();
+    st.sel = -1;
+    showDetail(-1);
+    renderCount();
+    renderTable(true);
+    if (st.openField) renderFields();
+  }
+
+  function renderCount() {
+    const total = st.lines.length;
+    const n = st.view.length;
+    $("count").innerHTML =
+      (n === total ? "<b>" + total.toLocaleString() + "</b> records" : "<b>" + n.toLocaleString() + "</b> of " + total.toLocaleString()) +
+      (st.bad ? ' · <span style="color:var(--bad)">' + st.bad.toLocaleString() + " invalid</span>" : "");
+  }
+
+  function addClause(clause) {
+    const cur = $("expr").value.trim();
+    $("expr").value = cur ? "(" + cur + ") && " + clause : clause;
+    applyFilter();
+  }
+
+  // ------------------------------------------------------------ fields
+
+  function renderFields() {
+    const html = ['<h2>Fields <span class="chip">' + st.schema.length + "</span></h2>"];
+    for (const f of st.schema) {
+      const isCol = st.cols.some((c) => c.join("\u0000") === f.path.join("\u0000"));
+      const open = st.openField === f.key;
+      const depth = f.path.filter((p) => p !== "[]").length - 1;
+      html.push(
+        '<div class="field' + (isCol ? " col" : "") + (open ? " open" : "") + '" data-key="' + esc(f.key) + '" title="' + esc(f.key) + " · in " + Math.round(f.coverage * 100) + '% of sampled records">' +
+          '<div class="top"><span class="name" style="padding-left:' + depth * 10 + 'px">' + esc(depth ? f.key.slice(f.key.lastIndexOf(".") + 1) : f.key) + "</span>" +
+          '<span class="types">' + Object.keys(f.types).map((t) => '<span class="ty ' + t + '">' + (t === "boolean" ? "bool" : t === "string" ? "str" : t === "number" ? "num" : t === "object" ? "obj" : t === "array" ? "arr" : "null") + "</span>").join("") + "</span></div>" +
+          '<div class="cov"><i style="width:' + (f.coverage * 100).toFixed(1) + '%"></i></div>' +
+        "</div>"
+      );
+      if (open) html.push(facetHTML(f));
+    }
+    $("fields").innerHTML = html.join("");
+  }
+
+  function facetHTML(f) {
+    let h = '<div class="facet">';
+    const canFilter = !f.inArray;
+    if (f.types.number) {
+      const vals = [];
+      const limit = Math.min(st.view.length, 200000);
+      for (let i = 0; i < limit; i++) {
+        const o = parse(st.view[i]);
+        if (f.inArray) L.getAll(o, f.path, vals);
+        else vals.push(L.get(o, f.path));
+      }
+      const s = L.numericStats(vals);
+      if (s) {
+        const hist = L.histogram(vals, 28);
+        const max = Math.max(...hist.map((b) => b.n));
+        h += '<div class="hist" title="Distribution over ' + s.n.toLocaleString() + ' values">' + hist.map((b) => '<i style="height:' + Math.max(2, (b.n / max) * 100) + '%" title="' + L.formatNumber(b.lo) + "–" + L.formatNumber(b.hi) + ": " + b.n + '"></i>').join("") + "</div>";
+        h += '<dl class="stats">' + [["count", s.n], ["min", s.min], ["p50", s.p50], ["mean", s.mean], ["p90", s.p90], ["p99", s.p99], ["max", s.max], ["sum", s.sum]].map(([k, v]) => "<dt>" + k + "</dt><dd>" + L.formatNumber(v) + "</dd>").join("") + "</dl>";
+        if (limit < st.view.length) h += '<div class="muted small">first ' + limit.toLocaleString() + " matching records</div>";
+      }
+    }
+    if (f.values && f.values.size && !(f.numeric && f.values.size > 12)) {
+      const entries = [...f.values.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+      const max = entries[0][1];
+      h += '<div class="muted small" style="margin:6px 0 4px">Top values (sample)' + (canFilter ? " · click to filter" : "") + "</div>";
+      for (const [v, n] of entries) {
+        h += '<div class="fv" ' + (canFilter ? 'data-eq="' + esc(JSON.stringify(v)) + '"' : "") + '><i class="bg" style="width:' + ((n / max) * 100).toFixed(1) + '%"></i><span>' + esc(JSON.stringify(v)) + '</span><span class="c">' + n.toLocaleString() + "</span></div>";
+      }
+    } else if (!f.types.number) {
+      h += '<div class="muted small">Too many distinct values to list.</div>';
+    }
+    h += '<div class="acts">';
+    if (!f.inArray) h += '<button class="btn small" data-col="1" type="button">' + (st.cols.some((c) => c.join("\u0000") === f.path.join("\u0000")) ? "Hide column" : "Show column") + "</button>";
+    if (!f.inArray) h += '<button class="btn small ghost" data-exists="1" type="button">Has value</button>';
+    h += "</div></div>";
+    return h;
+  }
+
+  $("fields").addEventListener("click", (e) => {
+    const fieldEl = e.target.closest(".field");
+    if (fieldEl) {
+      st.openField = st.openField === fieldEl.dataset.key ? null : fieldEl.dataset.key;
+      renderFields();
+      return;
+    }
+    const f = st.schema.find((x) => x.key === st.openField);
+    if (!f) return;
+    const eq = e.target.closest("[data-eq]");
+    if (eq) return addClause(L.equalsClause(f.path, JSON.parse(eq.dataset.eq)));
+    if (e.target.closest("[data-exists]")) return addClause(L.accessor(f.path) + " != null");
+    if (e.target.closest("[data-col]")) {
+      const k = f.path.join("\u0000");
+      const i = st.cols.findIndex((c) => c.join("\u0000") === k);
+      if (i >= 0) st.cols.splice(i, 1);
+      else st.cols.push(f.path);
+      renderFields();
+      renderTable(true);
+    }
+  });
+
+  // ------------------------------------------------------------ table
+
+  const widthCache = new Map();
+  function colWidth(path) {
+    const key = path.join("\u0000");
+    if (widthCache.has(key)) return widthCache.get(key);
+    // size to the header and the first 200 values, ~7.6px per monospace char
+    let chars = L.displayPath(path).length + 2;
+    for (let i = 0; i < Math.min(200, st.lines.length); i++) chars = Math.max(chars, L.formatCell(L.get(parse(i), path), 60).length);
+    const w = Math.min(340, Math.max(64, Math.round(chars * 7.6 + 22)));
+    widthCache.set(key, w);
+    return w;
+  }
+
+  function renderTable(reset) {
+    const idxW = Math.max(56, String(st.lines.length).length * 9 + 24);
+    $("thead").innerHTML =
+      '<div class="th" style="width:' + idxW + 'px;cursor:default">#</div>' +
+      st.cols.map((c, i) => {
+        const sorted = st.sort && st.sort.path.join("\u0000") === c.join("\u0000");
+        return '<div class="th' + (sorted ? " sorted" + (st.sort.dir > 0 ? " asc" : "") : "") + '" data-sort="' + i + '" style="width:' + colWidth(c) + 'px" title="Sort by ' + esc(L.displayPath(c)) + '">' + esc(L.displayPath(c)) + "</div>";
+      }).join("") +
+      '<div class="th" style="width:600px;cursor:default">record</div>';
+    st.idxW = idxW;
+    $("rows").style.height = st.view.length * ROW + "px";
+    if (reset) $("tablewrap").scrollTop = 0;
+    paintRows();
+  }
+
+  function cell(v, w) {
+    let cls = "td";
+    if (typeof v === "number") cls += " num";
+    else if (v === null || v === undefined) cls += " nul";
+    else if (typeof v === "boolean") cls += " bool";
+    return '<div class="' + cls + '" style="width:' + w + 'px">' + esc(L.formatCell(v, 200)) + "</div>";
+  }
+
+  function paintRows() {
+    const wrap = $("tablewrap");
+    const top = Math.max(0, wrap.scrollTop - 32);
+    const first = Math.max(0, Math.floor(top / ROW) - 10);
+    const last = Math.min(st.view.length, Math.ceil((top + wrap.clientHeight) / ROW) + 10);
+    const widths = st.cols.map(colWidth);
+    let html = "";
+    for (let vi = first; vi < last; vi++) {
+      const i = st.view[vi];
+      const o = parse(i);
+      html += '<div class="tr' + (vi === st.sel ? " sel" : "") + '" data-vi="' + vi + '" style="top:' + vi * ROW + 'px">' + '<div class="td idx" style="width:' + st.idxW + 'px">' + (i + 1) + "</div>";
+      if (o === undefined) html += '<div class="td bad" style="width:600px">invalid JSON: ' + esc(st.lines[i].slice(0, 120)) + "</div>";
+      else {
+        st.cols.forEach((c, k) => (html += cell(L.get(o, c), widths[k])));
+        html += '<div class="td" style="width:600px;color:var(--ink-3)">' + esc(st.lines[i].slice(0, 220)) + "</div>";
+      }
+      html += "</div>";
+    }
+    if (!st.view.length) html = '<div class="noresult">No records match.</div>';
+    $("rows").innerHTML = html;
+  }
+
+  let raf = 0;
+  $("tablewrap").addEventListener("scroll", () => {
+    if (!raf) raf = requestAnimationFrame(() => ((raf = 0), paintRows()));
+  });
+  new ResizeObserver(() => st.lines.length && paintRows()).observe($("tablewrap"));
+
+  $("rows").addEventListener("click", (e) => {
+    const tr = e.target.closest("[data-vi]");
+    if (tr) select(+tr.dataset.vi);
+  });
+
+  $("thead").addEventListener("click", (e) => {
+    const th = e.target.closest("[data-sort]");
+    if (!th) return;
+    const path = st.cols[+th.dataset.sort];
+    if (st.sort && st.sort.path.join("\u0000") === path.join("\u0000")) st.sort.dir = st.sort.dir < 0 ? 1 : 0;
+    else st.sort = { path, dir: -1 };
+    if (st.sort.dir === 0) {
+      st.sort = null;
+      st.view.sort();
+    } else sortView();
+    st.sel = -1;
+    showDetail(-1);
+    renderTable(true);
+  });
+
+  function sortView() {
+    const { path, dir } = st.sort;
+    const keyed = Array.from(st.view, (i) => [L.get(parse(i), path), i]);
+    const rank = (v) => (v === undefined ? 4 : v === null ? 3 : typeof v === "number" ? 0 : typeof v === "string" ? 1 : 2);
+    keyed.sort((a, b) => {
+      const ra = rank(a[0]), rb = rank(b[0]);
+      if (ra !== rb) return ra - rb; // missing values last regardless of direction
+      if (ra === 0) return dir * (a[0] - b[0]) || a[1] - b[1];
+      if (ra === 1) return dir * a[0].localeCompare(b[0]) || a[1] - b[1];
+      if (ra === 2) return dir * JSON.stringify(a[0]).localeCompare(JSON.stringify(b[0])) || a[1] - b[1];
+      return a[1] - b[1];
+    });
+    st.view = Int32Array.from(keyed, (k) => k[1]);
+  }
+
+  // ------------------------------------------------------------ detail
+
+  function select(vi) {
+    if (vi < 0 || vi >= st.view.length) return;
+    st.sel = vi;
+    showDetail(vi);
+    const wrap = $("tablewrap");
+    const y = vi * ROW;
+    if (y < wrap.scrollTop + 32) wrap.scrollTop = y - 32;
+    else if (y + ROW > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = y + ROW - wrap.clientHeight;
+    paintRows();
+  }
+
+  function showDetail(vi) {
+    $("cols").classList.toggle("nodetail", vi < 0);
+    if (vi < 0) return;
+    const i = st.view[vi];
+    const o = parse(i);
+    $("dtitle").textContent = "Record " + (i + 1).toLocaleString();
+    $("tree").innerHTML = o === undefined ? '<div class="kv"><span class="z">invalid JSON</span>\n' + esc(st.lines[i]) + "</div>" : treeHTML(o, null, 0, []);
+  }
+
+  function scalarHTML(v) {
+    if (v === null) return '<span class="z">null</span>';
+    if (typeof v === "string") return '<span class="s">' + esc(JSON.stringify(v)) + "</span>";
+    if (typeof v === "number") return '<span class="n">' + v + "</span>";
+    if (typeof v === "boolean") return '<span class="b">' + v + "</span>";
+    return esc(String(v));
+  }
+
+  function treeHTML(v, key, depth, path) {
+    const k = key === null ? "" : '<span class="k" data-path="' + esc(L.accessor(path)) + '" title="Click to copy accessor">' + esc(typeof key === "number" ? String(key) : IDENTish(key)) + "</span>: ";
+    if (v === null || typeof v !== "object") return '<div class="kv">' + k + scalarHTML(v) + "</div>";
+    const isArr = Array.isArray(v);
+    const entries = isArr ? v.map((x, i) => [i, x]) : Object.entries(v);
+    const meta = isArr ? "[" + v.length + "]" : "{" + entries.length + "}";
+    const inner = entries.slice(0, 500).map(([kk, x]) => treeHTML(x, kk, depth + 1, isArr ? path.concat("[]") : path.concat(kk))).join("") + (entries.length > 500 ? '<div class="meta">… ' + (entries.length - 500) + " more</div>" : "");
+    if (depth === 0) return inner || '<span class="meta">' + meta + "</span>";
+    return "<details" + (depth < 3 && entries.length < 60 ? " open" : "") + "><summary>" + k + '<span class="meta">' + meta + "</span></summary>" + inner + "</details>";
+  }
+  function IDENTish(k) {
+    return /^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k);
+  }
+
+  $("tree").addEventListener("click", (e) => {
+    const k = e.target.closest(".k");
+    if (k && !k.dataset.path.includes("[]")) {
+      e.preventDefault();
+      copy(k.dataset.path, "Copied " + k.dataset.path);
+    }
+  });
+  $("copyrec").addEventListener("click", () => {
+    if (st.sel < 0) return;
+    copy(JSON.stringify(parse(st.view[st.sel]), null, 2), "Copied record");
+  });
+  $("prev").addEventListener("click", () => select(st.sel - 1));
+  $("next").addEventListener("click", () => select(st.sel + 1));
+  $("closedetail").addEventListener("click", () => {
+    st.sel = -1;
+    showDetail(-1);
+    paintRows();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!st.lines.length || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    if (e.key === "j" || e.key === "ArrowDown") {
+      e.preventDefault();
+      select(Math.min(st.view.length - 1, st.sel + 1));
+    } else if (e.key === "k" || e.key === "ArrowUp") {
+      e.preventDefault();
+      select(Math.max(0, st.sel - 1));
+    } else if (e.key === "Escape") $("closedetail").click();
+    else if (e.key === "/") {
+      e.preventDefault();
+      $("expr").focus();
+    }
+  });
+
+  // ------------------------------------------------------------ query bar
+
+  $("expr").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") applyFilter();
+  });
+  $("expr").addEventListener("input", debounce(() => {
+    const { error } = L.compileFilter($("expr").value);
+    $("expr").classList.toggle("err", !!error);
+    if (!$("expr").value.trim()) applyFilter();
+  }, 250));
+  $("search").addEventListener("input", debounce(applyFilter, 250));
+  $("export").addEventListener("click", () => {
+    const parts = [];
+    for (const i of st.view) parts.push(st.lines[i], "\n");
+    const base = st.name.replace(/\.(jsonl|ndjson|json|log|txt)$/i, "");
+    download(base + (st.view.length === st.lines.length ? "" : ".filtered") + ".jsonl", parts.join(""), "application/x-ndjson");
+    toast("Exported " + st.view.length.toLocaleString() + " records");
+  });
+  $("close").addEventListener("click", () => {
+    $("work").classList.remove("show");
+    document.body.classList.remove("loaded");
+    $("landing").hidden = false;
+    st.lines = [];
+    st.objs = null;
+    $("file").value = "";
+  });
+
+  // ------------------------------------------------------------ inputs
+
+  $("file").addEventListener("change", (e) => e.target.files[0] && loadFile(e.target.files[0]));
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((t) =>
+    document.addEventListener(t, (e) => {
+      e.preventDefault();
+      drop.classList.add("over");
+    })
+  );
+  ["dragleave", "drop"].forEach((t) =>
+    document.addEventListener(t, (e) => {
+      e.preventDefault();
+      if (t === "dragleave" && e.relatedTarget) return;
+      drop.classList.remove("over");
+    })
+  );
+  document.addEventListener("drop", (e) => {
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) loadFile(f);
+  });
+
+  // deterministic synthetic API logs
+  $("sample").addEventListener("click", async () => {
+    let seed = 7;
+    const rnd = () => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = (a) => a[Math.floor(rnd() * a.length)];
+    const routes = [["GET", "/api/v2/projects"], ["GET", "/api/v2/projects/:id"], ["POST", "/api/v2/projects"], ["GET", "/api/v2/search"], ["POST", "/api/v2/chat/completions"], ["PUT", "/api/v2/users/:id"], ["GET", "/healthz"], ["POST", "/api/v2/uploads"]];
+    const regions = ["us-east-1", "us-east-1", "eu-west-1", "ap-south-1", "eu-central-1"];
+    const plans = ["free", "free", "free", "pro", "pro", "team", "enterprise"];
+    const countries = ["US", "DE", "IN", "BD", "BR", "GB", "JP", "NG", "FR", "CA"];
+    const errors = [["UPSTREAM_TIMEOUT", "model provider timed out after 30s"], ["RATE_LIMITED", "too many requests for plan"], ["DB_CONN", "could not acquire connection from pool"], ["VALIDATION", "field 'name' is required"]];
+    const lines = [];
+    let ts = Date.UTC(2026, 9, 1, 0, 0, 0);
+    for (let i = 0; i < 20000; i++) {
+      ts += Math.floor(rnd() * 9000);
+      const [method, route] = pick(routes);
+      const slow = route.includes("chat") ? 6 : route === "/healthz" ? 0.05 : 1;
+      const latency = Math.round((20 + Math.pow(rnd(), 3) * 900) * slow);
+      let status = rnd() < 0.9 ? (method === "POST" ? 201 : 200) : pick([400, 401, 404, 429, 500, 502, 503]);
+      if (latency > 4000 && rnd() < 0.5) status = 504;
+      const rec = {
+        ts: new Date(ts).toISOString(),
+        level: status >= 500 ? "error" : status >= 400 ? "warn" : "info",
+        method,
+        route,
+        status,
+        latency_ms: latency,
+        bytes: Math.round(200 + rnd() * (route.includes("search") ? 90000 : 8000)),
+        region: pick(regions),
+        user: { id: "u_" + Math.floor(rnd() * 3000).toString(36), plan: pick(plans), country: pick(countries) },
+        trace_id: Math.floor(rnd() * 2 ** 48).toString(16).padStart(12, "0"),
+      };
+      if (route.includes("chat")) rec.tokens = { input: Math.round(200 + rnd() * 6000), output: Math.round(20 + rnd() * 1500) };
+      if (status >= 500) {
+        const [code, message] = status === 504 ? errors[0] : pick(errors);
+        rec.error = { code, message, retryable: code !== "VALIDATION" };
+      }
+      if (rnd() < 0.15) rec.tags = ["beta", "canary", "mobile", "sdk-js", "sdk-py"].filter(() => rnd() < 0.4);
+      lines.push(JSON.stringify(rec));
+    }
+    await ingest(lines, "sample-api-logs.jsonl", lines.reduce((s, l) => s + l.length + 1, 0));
+  });
+})();
+</script>
+</body>
+</html>
