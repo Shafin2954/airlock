@@ -13,6 +13,7 @@
     { id: "scrub", name: "Scrub", href: "scrub/" },
     { id: "context-map", name: "Context Map", href: "context-map/" },
     { id: "jsonl-lens", name: "JSONL Lens", href: "jsonl-lens/" },
+    { id: "footprint", name: "Footprint", href: "footprint/" },
   ];
 
   const REPO = "https://github.com/Shafin2954/anything";

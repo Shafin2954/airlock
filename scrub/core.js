@@ -39,6 +39,18 @@
     return sum % 10 === 0;
   }
 
+  // ISO 13616 mod-97 check
+  function ibanValid(s) {
+    if (s.length < 15 || s.length > 34) return false;
+    const r = s.slice(4) + s.slice(0, 4);
+    let rem = 0;
+    for (const ch of r) {
+      const v = ch >= "A" && ch <= "Z" ? String(ch.charCodeAt(0) - 55) : ch;
+      for (const d of v) rem = (rem * 10 + (d.charCodeAt(0) - 48)) % 97;
+    }
+    return rem === 1;
+  }
+
   function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -416,6 +428,66 @@
       priority: 70,
     },
     {
+      id: "iban",
+      label: "Bank account (IBAN)",
+      kind: "pii",
+      type: "IBAN",
+      re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/g,
+      validate: (v) => ibanValid(v.replace(/ /g, "")),
+      priority: 72,
+    },
+    {
+      id: "us-ssn",
+      label: "US Social Security number",
+      kind: "pii",
+      type: "SSN",
+      re: /\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b/g,
+      // only with a nearby hint, so part numbers and dates in this shape don't trip it
+      validate: (v, m) => /\b(?:ssn|ss#|social[\s-]*security|soc\.?\s*sec)/i.test(m.input.slice(Math.max(0, m.index - 60), m.index + v.length + 30)),
+      priority: 71,
+    },
+
+    // ------------------------------------------------------------- hidden text
+    // Invisible characters used to smuggle instructions to an AI ("ASCII smuggling",
+    // Trojan Source). These are not stored for restore: they are replaced by a visible
+    // marker that shows what was hidden.
+    {
+      id: "hidden-tag-text",
+      label: "Hidden text (Unicode tag characters)",
+      kind: "hidden",
+      type: "HIDDEN",
+      re: /[\u{E0000}-\u{E007F}]+/gu,
+      // the England / Scotland / Wales flag emoji legitimately use tag characters after U+1F3F4
+      validate: (v, m) => m.input.codePointAt(Math.max(0, m.index - 2)) !== 0x1f3f4,
+      replace: (v) => {
+        const decoded = Array.from(v, (c) => c.codePointAt(0) - 0xe0000)
+          .filter((n) => n >= 0x20 && n <= 0x7e)
+          .map((n) => String.fromCharCode(n))
+          .join("");
+        return decoded ? '[HIDDEN TEXT: "' + decoded + '"]' : "[HIDDEN CHARACTERS]";
+      },
+      priority: 105,
+    },
+    {
+      id: "zero-width-run",
+      label: "Run of invisible characters",
+      kind: "hidden",
+      type: "HIDDEN",
+      // a single ZWJ/ZWNJ is normal (emoji sequences, Persian, Indic scripts); long runs encode data
+      re: /[​‌‍⁠﻿᠎]{3,}/g,
+      replace: (v) => "[HIDDEN CHARACTERS ×" + v.length + "]",
+      priority: 104,
+    },
+    {
+      id: "bidi-control",
+      label: "Text-direction override (Trojan Source)",
+      kind: "hidden",
+      type: "HIDDEN",
+      re: /[‪-‮⁦-⁩]/g,
+      replace: () => "[DIRECTION OVERRIDE]",
+      priority: 103,
+    },
+    {
       id: "mac-address",
       label: "MAC address",
       kind: "pii",
@@ -483,7 +555,7 @@
 
   const DEFAULTS = {
     enabled: null, // map of ruleId -> boolean overrides
-    kinds: ["secret", "pii"], // which kinds to scan for
+    kinds: ["secret", "pii", "hidden"], // which kinds to scan for
     keepPrivateIPs: true,
     customTerms: [], // extra words/phrases to redact (company names, codenames…)
     allowlist: [], // exact values never to redact
@@ -619,7 +691,9 @@
     let last = 0;
     const segments = [];
     for (const f of findings) {
-      const ph = placeholderFor(vault, f.type, f.value);
+      const rule = RULE_BY_ID[f.ruleId];
+      // hidden-text rules are replaced by a visible marker and never stored for restore
+      const ph = rule && rule.replace ? rule.replace(f.value) : placeholderFor(vault, f.type, f.value);
       f.placeholder = ph;
       out += text.slice(last, f.start);
       segments.push({ start: out.length, end: out.length + ph.length, finding: f });
@@ -650,6 +724,12 @@
     return value.slice(0, 4) + "…" + "•".repeat(Math.min(8, value.length - 6)) + value.slice(-2);
   }
 
+  // what to show a person for a finding without revealing a secret
+  function preview(f) {
+    const rule = RULE_BY_ID[f.ruleId];
+    return rule && rule.replace ? rule.replace(f.value) : mask(f.value);
+  }
+
   function rules() {
     return RULES.map((r) => ({ id: r.id, label: r.label, kind: r.kind, type: r.type, defaultOn: !r.off }));
   }
@@ -662,6 +742,7 @@
     restore,
     createVault,
     mask,
+    preview,
     entropy,
     _ruleById: RULE_BY_ID,
   };

@@ -24,6 +24,7 @@ Options
   --json              print findings as JSON (redact/check)
   --secrets-only      skip personal data (emails, IPs, paths, cards…)
   --pii-only          skip secrets
+  --hidden-only       only look for invisible / smuggled text
   --enable <ids>      comma-separated rule ids to turn on (e.g. phone)
   --disable <ids>     comma-separated rule ids to turn off
   --term <text>       extra word/phrase to redact (repeatable)
@@ -53,6 +54,7 @@ function parse(argv) {
     else if (x === "--json") a.json = true;
     else if (x === "--secrets-only") a.kinds = ["secret"];
     else if (x === "--pii-only") a.kinds = ["pii"];
+    else if (x === "--hidden-only") a.kinds = ["hidden"];
     else if (x === "--enable") a.enable.push(...next().split(","));
     else if (x === "--disable") a.disable.push(...next().split(","));
     else if (x === "--term") a.terms.push(next());
@@ -97,7 +99,7 @@ function options(a) {
   const known = new Set(S.rules().map((r) => r.id));
   for (const id of Object.keys(enabled)) if (!known.has(id)) die(`unknown rule "${id}" (see: scrub rules)`);
   return {
-    kinds: a.kinds || ["secret", "pii"],
+    kinds: a.kinds || ["secret", "pii", "hidden"],
     enabled,
     customTerms: a.terms,
     allowlist: a.allow,
@@ -157,7 +159,8 @@ function runHook(a) {
     process.exit(0); // never break the agent on malformed input
   }
   const event = input.hook_event_name;
-  const opts = options(Object.assign({}, a, { kinds: a.kinds || ["secret"] }));
+  // secrets, plus hidden-text smuggling (a prompt-injection vector); PII alone never blocks
+  const opts = options(Object.assign({}, a, { kinds: a.kinds || ["secret", "hidden"] }));
   let texts = [];
   if (event === "UserPromptSubmit") texts = [String(input.prompt || "")];
   else if (event === "PreToolUse") texts = collectStrings(input.tool_input, []);
@@ -168,15 +171,20 @@ function runHook(a) {
 
   const list = findings
     .slice(0, 8)
-    .map((f) => `  • ${f.label}: ${S.mask(f.value)}`)
+    .map((f) => `  • ${f.label}: ${S.preview(f)}`)
     .join("\n");
   const more = findings.length > 8 ? `\n  • …and ${findings.length - 8} more` : "";
   const where = event === "UserPromptSubmit" ? "your prompt" : `this ${input.tool_name || "tool"} call`;
+  const nSecret = findings.filter((f) => f.kind === "secret").length;
+  const nHidden = findings.length - nSecret;
+  const what = [nSecret && (nSecret === 1 ? "a secret" : nSecret + " secrets"), nHidden && "hidden text that could be a prompt injection"].filter(Boolean).join(" and ");
   process.stderr.write(
-    `airlock-scrub blocked ${where}: it contains ${findings.length === 1 ? "a secret" : findings.length + " secrets"}.\n${list}${more}\n` +
-      (event === "UserPromptSubmit"
-        ? "Remove it (or run it through `scrub`) and send again. Rotate the credential if it was already shared.\n"
-        : "Use an environment variable or a secrets manager instead of inlining the value.\n")
+    `airlock-scrub blocked ${where}: it contains ${what}.\n${list}${more}\n` +
+      (nSecret
+        ? event === "UserPromptSubmit"
+          ? "Remove it (or run it through `scrub`) and send again. Rotate the credential if it was already shared.\n"
+          : "Use an environment variable or a secrets manager instead of inlining the value.\n"
+        : "Invisible characters were found. Check where this text came from before sending it.\n")
   );
   process.exit(2);
 }
@@ -218,10 +226,10 @@ function main() {
     const findings = S.scan(text, opts);
     if (a.json) {
       process.stdout.write(
-        JSON.stringify(findings.map((f) => ({ rule: f.ruleId, label: f.label, kind: f.kind, at: lineCol(text, f.start), preview: S.mask(f.value) })), null, 2) + "\n"
+        JSON.stringify(findings.map((f) => ({ rule: f.ruleId, label: f.label, kind: f.kind, at: lineCol(text, f.start), preview: S.preview(f) })), null, 2) + "\n"
       );
     } else if (findings.length) {
-      for (const f of findings) process.stderr.write(`${lineCol(text, f.start).padEnd(8)} ${f.label.padEnd(28)} ${S.mask(f.value)}\n`);
+      for (const f of findings) process.stderr.write(`${lineCol(text, f.start).padEnd(8)} ${f.label.padEnd(28)} ${S.preview(f)}\n`);
       process.stderr.write(`\nscrub: found ${summary(findings)}\n`);
     } else {
       process.stderr.write("scrub: clean\n");

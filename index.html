@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Airlock — local-first tools for working with AI</title>
-<meta name="description" content="Redact secrets before you paste into ChatGPT or Claude, see your codebase in tokens, and explore huge JSONL files. Free, open source, and nothing ever leaves your browser.">
+<meta name="description" content="See what you've told ChatGPT and Claude, redact secrets before you paste, see your codebase in tokens, and scan huge JSONL datasets for leaks. Free, open source, and nothing ever leaves your browser.">
 <meta property="og:title" content="Airlock — local-first tools for working with AI">
 <meta property="og:description" content="Redact secrets before you paste, see your codebase in tokens, explore huge JSONL. Nothing leaves your browser.">
 <meta property="og:image" content="docs/screenshots/context-map.png">
@@ -53,9 +53,10 @@
 <main class="wrap">
   <section class="hero">
     <h1>Tools for the space between <em>you</em> and your AI.</h1>
-    <p>Before code, logs and data go into a chat window, they pass through the airlock: secrets stripped, context measured, giant files made readable. Every tool is a static page that never sends your data anywhere.</p>
+    <p>Before code, logs and data go into a chat window, they pass through the airlock: secrets stripped, context measured, giant files made readable. And for everything already sent, see exactly what you've told AI. Every tool is a static page that never sends your data anywhere.</p>
     <div class="cta">
-      <a class="btn primary" href="scrub/">Scrub some text</a>
+      <a class="btn primary" href="footprint/">See what you've told AI</a>
+      <a class="btn" href="scrub/">Scrub some text</a>
       <a class="btn" href="context-map/">Map a codebase</a>
       <a class="btn" href="jsonl-lens/">Open a JSONL file</a>
     </div>
@@ -63,13 +64,29 @@
   </section>
 
   <section class="tools">
+    <a class="tool" href="footprint/">
+      <div>
+        <div class="tag">Audit your history</div>
+        <h2>Footprint</h2>
+        <p>Drop in your ChatGPT or Claude data export. See every API key, password, account number, address and private topic you've shared, which chats to delete, and get a redacted copy of your history.</p>
+        <ul>
+          <li>Reads the export <code>.zip</code> directly, even multi-gigabyte ones</li>
+          <li>Secrets to rotate, identifiers, hidden text, and topics like health, money and legal</li>
+          <li>Links straight to each chat so you can delete it; nothing is ever shown in full</li>
+        </ul>
+        <span class="open">Open Footprint →</span>
+      </div>
+      <div class="shot"><img src="docs/screenshots/footprint.png" alt="Footprint report: secrets, identifiers, hidden text and sensitive topics found in a ChatGPT export" loading="lazy"></div>
+    </a>
+
     <a class="tool" href="scrub/">
       <div>
         <div class="tag">Paste safely</div>
         <h2>Scrub</h2>
         <p>Paste a stack trace, <code>.env</code> or config. API keys, passwords, tokens, emails, IPs and home-folder usernames become placeholders like <code>[STRIPE_KEY_1]</code>. Paste the AI's answer back and get your real values restored.</p>
         <ul>
-          <li>36 detectors: OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, JWTs, private keys, emails, IPs…</li>
+          <li>41 detectors: OpenAI, Anthropic, AWS, GitHub, Stripe, Slack, JWTs, private keys, IBANs, emails, IPs…</li>
+          <li>Reveals hidden “smuggled” text that can carry prompt injections</li>
           <li>Reversible — placeholders map back to originals, in your tab only</li>
           <li>Same engine as a CLI and a Claude Code hook that blocks leaked keys</li>
         </ul>
@@ -101,7 +118,7 @@
         <ul>
           <li>Streams big files; virtualized table stays smooth at millions of rows</li>
           <li>Click a value to filter by it; sort any column; export the slice</li>
-          <li>Handles JSON arrays and flags invalid lines</li>
+          <li>Scan a whole dataset for secrets and personal data, then export it redacted</li>
         </ul>
         <span class="open">Open JSONL Lens →</span>
       </div>

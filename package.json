@@ -1,7 +1,7 @@
 {
   "name": "airlock-tools",
   "version": "0.1.0",
-  "description": "Local-first tools for working with AI: redact secrets before you paste, map your codebase into a context window, explore huge JSONL logs. Nothing leaves your machine.",
+  "description": "Local-first tools for working with AI: see what you've told ChatGPT and Claude, redact secrets before you paste, map your codebase into a context window, scan huge JSONL datasets for leaks. Nothing leaves your machine.",
   "license": "MIT",
   "bin": {
     "scrub": "scrub/cli.js",
@@ -12,7 +12,8 @@
     "scrub/core.js",
     "scrub/cli.js",
     "context-map/core.js",
-    "jsonl-lens/core.js"
+    "jsonl-lens/core.js",
+    "footprint/core.js"
   ],
   "scripts": {
     "test": "node --test tests/*.test.js",

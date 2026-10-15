@@ -36,6 +36,7 @@
   .ph.secret { background: var(--secret-soft); color: var(--secret); }
   .ph.pii { background: var(--pii-soft); color: var(--pii); }
   .ph.custom { background: var(--custom-soft); color: var(--custom); }
+  .ph.hidden { background: var(--warn-soft); color: var(--warn); }
   .ph.restored { background: var(--ok-soft); color: var(--ok); font-weight: 500; }
   .ph.flash { outline: 2px solid var(--accent); }
 
@@ -53,6 +54,7 @@
   .summary .chip.secret { background: var(--secret-soft); color: var(--secret); }
   .summary .chip.pii { background: var(--pii-soft); color: var(--pii); }
   .summary .chip.custom { background: var(--custom-soft); color: var(--custom); }
+  .summary .chip.hidden { background: var(--warn-soft); color: var(--warn); }
 
   details.rules > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; padding: 12px; }
   details.rules > summary::-webkit-details-marker { display: none; }
@@ -133,6 +135,7 @@
               <label class="switch"><input type="checkbox" id="keep-private" checked> Keep private &amp; loopback IPs (10.x, 192.168.x, ::1)</label>
               <div class="rule-group" id="group-secret"><h3>Secrets</h3></div>
               <div class="rule-group" id="group-pii"><h3>Personal data</h3></div>
+              <div class="rule-group" id="group-hidden"><h3>Hidden characters</h3></div>
             </div>
           </details>
         </div>
@@ -245,7 +248,7 @@
     for (const s of last.segments) {
       html += esc(t.slice(pos, s.start));
       const f = s.finding;
-      html += '<span class="ph ' + f.kind + '" data-ph="' + esc(f.placeholder) + '" title="' + esc(f.label + " · " + S.mask(f.value)) + '">' + esc(f.placeholder) + "</span>";
+      html += '<span class="ph ' + f.kind + '" data-ph="' + esc(f.placeholder) + '" title="' + esc(f.label + " · " + S.preview(f)) + '">' + esc(f.placeholder) + "</span>";
       pos = s.end;
     }
     html += esc(t.slice(pos));
@@ -268,20 +271,21 @@
       g.n++;
       groups.set(f.placeholder, g);
     }
-    const kinds = { secret: 0, pii: 0, custom: 0 };
+    const kinds = { secret: 0, pii: 0, custom: 0, hidden: 0 };
     for (const g of groups.values()) kinds[g.f.kind]++;
     sum.hidden = false;
     sum.innerHTML =
       (kinds.secret ? '<span class="chip secret">' + kinds.secret + " secret" + (kinds.secret > 1 ? "s" : "") + "</span>" : "") +
       (kinds.pii ? '<span class="chip pii">' + kinds.pii + " personal</span>" : "") +
-      (kinds.custom ? '<span class="chip custom">' + kinds.custom + " custom</span>" : "");
+      (kinds.custom ? '<span class="chip custom">' + kinds.custom + " custom</span>" : "") +
+      (kinds.hidden ? '<span class="chip hidden">' + kinds.hidden + " hidden</span>" : "");
     box.innerHTML = [...groups.values()]
       .map(({ f, n }) =>
         '<div class="finding">' +
           '<span class="ph ' + f.kind + '" data-jump="' + esc(f.placeholder) + '" title="Show in output">' + esc(f.placeholder) + "</span>" +
           '<span class="lab">' + esc(f.label) + (n > 1 ? ' <span class="n">×' + n + "</span>" : "") + "</span>" +
           '<button class="btn small ghost" data-allow="' + esc(f.placeholder) + '" title="Not sensitive: never hide this value">Keep</button>' +
-          '<span class="val">' + esc(S.mask(f.value)) + "</span>" +
+          '<span class="val">' + esc(S.preview(f)) + "</span>" +
         "</div>"
       )
       .join("");
@@ -290,7 +294,8 @@
   $("findings").addEventListener("click", (e) => {
     const allowBtn = e.target.closest("[data-allow]");
     if (allowBtn) {
-      const value = current.map[allowBtn.dataset.allow];
+      const hit = last.findings.find((f) => f.placeholder === allowBtn.dataset.allow);
+      const value = hit ? hit.value : current.map[allowBtn.dataset.allow];
       if (value != null) {
         allow.add(value);
         renderAllow();
