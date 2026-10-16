@@ -184,6 +184,10 @@ Ideas, roughly in order. PRs welcome.
 
 [`cloak/`](cloak/) is a Chromium extension: a decoy new-tab page with a hidden, AES-encrypted set of links. Type your passphrase in the search box to reveal them; type anything else and it just searches. Read its [README](cloak/README.md), especially the honest **“How safe is this, really?”** threat model.
 
+### imok
+
+[`imok/`](imok/) is a daily “I'm OK” check-in for people who live alone, an open-source take on the viral *Are You Dead?* app. Tap one button each day. If you don't, you get reminders, and then the people you trust are alerted by email, ntfy, Telegram or webhook, with an all-clear when you check in. Runs free on your own Google account (one pasted file, no server) or self-hosted with Docker. See its [README](imok/README.md), including **“How safe is this, really?”**.
+
 ### Cloak Vault
 
 [`cloak-vault/`](cloak-vault/) is a desktop launcher (Python) that goes further: it opens a **blank decoy Chrome** by default and keeps your **real Chrome profile encrypted at rest** (scrypt + AES-256-GCM), decrypting it only while you use it. Unlike an extension it can give you an empty `chrome://extensions` and keep the real profile out of Chrome's profile picker. Honest threat model in its [README](cloak-vault/README.md): it stops a nosy non-forensic person, not a skilled attacker.

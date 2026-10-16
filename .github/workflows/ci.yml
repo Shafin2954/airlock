@@ -63,3 +63,47 @@ jobs:
           python-version: "3.12"
       - run: pip install cryptography
       - run: cd cloak-vault && python -m unittest discover -s tests -p 'test_*.py'
+
+  imok:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test imok/tests/*.test.js
+      - run: node imok/apps-script/build.js --check
+
+  imok-browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save playwright@1.56.1
+      - run: npx playwright install --with-deps chromium
+      - run: node imok/tests/e2e.mjs
+
+  imok-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t imok imok
+      - name: Run the image and check it serves
+        run: |
+          mkdir -p /tmp/imok-data
+          cat > /tmp/imok-data/config.json <<'JSON'
+          { "name": "CI", "self": { "webhook": "http://127.0.0.1:9/self" },
+            "contacts": [{ "name": "A", "webhook": "http://127.0.0.1:9/a", "level": 1 }],
+            "token": "ci-token-0123456789abcdefghij" }
+          JSON
+          docker run -d --name imok -p 8080:8080 -v /tmp/imok-data:/data imok
+          for i in $(seq 1 30); do curl -fs localhost:8080/healthz && break; sleep 1; done
+          curl -fs localhost:8080/ci-token-0123456789abcdefghij/ | grep -q "I'm OK"
+          curl -fs -X POST localhost:8080/ci-token-0123456789abcdefghij/api/checkin | grep -q '"stage":"ok"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/wrong/)" = 404
+          docker logs imok

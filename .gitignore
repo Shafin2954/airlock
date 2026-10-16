@@ -8,3 +8,4 @@ test-results/
 # python
 __pycache__/
 *.pyc
+imok/data/
