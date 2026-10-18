@@ -16,7 +16,7 @@
     { id: "footprint", name: "Footprint", href: "footprint/" },
   ];
 
-  const REPO = "https://github.com/Shafin2954/anything";
+  const REPO = "https://github.com/Shafin2954/airlock";
 
   function theme() {
     try {

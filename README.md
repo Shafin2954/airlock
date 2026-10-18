@@ -7,9 +7,9 @@
 See what you've already told AI. Strip secrets before you paste. See your codebase in tokens. Open the JSONL file nothing else will.<br>
 Static pages, zero dependencies, and your data never leaves the browser tab.
 
-[**Open the tools →**](https://shafin2954.github.io/anything/) &nbsp;·&nbsp; [Footprint](https://shafin2954.github.io/anything/footprint/) &nbsp;·&nbsp; [Scrub](https://shafin2954.github.io/anything/scrub/) &nbsp;·&nbsp; [Context Map](https://shafin2954.github.io/anything/context-map/) &nbsp;·&nbsp; [JSONL Lens](https://shafin2954.github.io/anything/jsonl-lens/) &nbsp;·&nbsp; [CLI & Claude Code hook](#scrub-cli)
+[**Open the tools →**](https://shafin2954.github.io/airlock/) &nbsp;·&nbsp; [Footprint](https://shafin2954.github.io/airlock/footprint/) &nbsp;·&nbsp; [Scrub](https://shafin2954.github.io/airlock/scrub/) &nbsp;·&nbsp; [Context Map](https://shafin2954.github.io/airlock/context-map/) &nbsp;·&nbsp; [JSONL Lens](https://shafin2954.github.io/airlock/jsonl-lens/) &nbsp;·&nbsp; [CLI & Claude Code hook](#scrub-cli)
 
-[![CI](https://github.com/Shafin2954/anything/actions/workflows/ci.yml/badge.svg)](https://github.com/Shafin2954/anything/actions/workflows/ci.yml)
+[![CI](https://github.com/Shafin2954/airlock/actions/workflows/ci.yml/badge.svg)](https://github.com/Shafin2954/airlock/actions/workflows/ci.yml)
 ![dependencies: 0](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![network: none](https://img.shields.io/badge/network%20requests-none-brightgreen)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -85,7 +85,7 @@ Try it with the built-in sample: 20,000 synthetic API log lines, with a few leak
 The same engine as a zero-dependency Node CLI (Node 18+).
 
 ```bash
-npm i -g github:Shafin2954/anything     # installs the `scrub` command
+npm i -g github:Shafin2954/airlock     # installs the `scrub` command
 
 # redact clipboard, keep a map, restore the reply later
 pbpaste | scrub --map .scrub.json | pbcopy
@@ -133,7 +133,7 @@ scrub.restore("I wrote to [EMAIL_1]", vault).text; // "I wrote to jane@corp.io"
 No build step. Clone and open `index.html`, or serve the folder:
 
 ```bash
-git clone https://github.com/Shafin2954/anything airlock && cd airlock
+git clone https://github.com/Shafin2954/airlock && cd airlock
 npx serve .            # or python3 -m http.server
 ```
 
@@ -172,25 +172,7 @@ Ideas, roughly in order. PRs welcome.
 - [ ] Footprint: Gemini (Google Takeout) and Copilot exports
 - [ ] Agent-transcript view in JSONL Lens (Claude Code, Codex, OpenAI/Anthropic message formats)
 - [ ] Context Map: load a public GitHub repo by URL
-- [ ] More detectors. [Open an issue](https://github.com/Shafin2954/anything/issues/new?template=detector.md) with a format and a fake example.
-
-## Also in this repo
-
-### PeekBar
-
-[`peekbar/`](peekbar/) is a separate Chromium extension: Firefox-style reveal-on-hover tabs and address bar in full screen (F11), with tabs-only / address-only presets. See its [README](peekbar/README.md).
-
-### Cloak
-
-[`cloak/`](cloak/) is a Chromium extension: a decoy new-tab page with a hidden, AES-encrypted set of links. Type your passphrase in the search box to reveal them; type anything else and it just searches. Read its [README](cloak/README.md), especially the honest **“How safe is this, really?”** threat model.
-
-### imok
-
-[`imok/`](imok/) is a daily “I'm OK” check-in for people who live alone, an open-source take on the viral *Are You Dead?* app. Tap one button each day. If you don't, you get reminders, and then the people you trust are alerted by email, ntfy, Telegram or webhook, with an all-clear when you check in. Runs free on your own Google account (one pasted file, no server) or self-hosted with Docker. See its [README](imok/README.md), including **“How safe is this, really?”**.
-
-### Cloak Vault
-
-[`cloak-vault/`](cloak-vault/) is a desktop launcher (Python) that goes further: it opens a **blank decoy Chrome** by default and keeps your **real Chrome profile encrypted at rest** (scrypt + AES-256-GCM), decrypting it only while you use it. Unlike an extension it can give you an empty `chrome://extensions` and keep the real profile out of Chrome's profile picker. Honest threat model in its [README](cloak-vault/README.md): it stops a nosy non-forensic person, not a skilled attacker.
+- [ ] More detectors. [Open an issue](https://github.com/Shafin2954/airlock/issues/new?template=detector.md) with a format and a fake example.
 
 ## License
 

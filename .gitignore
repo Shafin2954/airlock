@@ -5,7 +5,3 @@ node_modules/
 scrub-map.json
 test-results/
 
-# python
-__pycache__/
-*.pyc
-imok/data/
