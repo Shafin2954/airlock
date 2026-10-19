@@ -4,6 +4,7 @@
 // Needs Playwright with Chromium (npx playwright install chromium).
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -310,6 +311,7 @@ await check("footprint: sample report, no secret leaks into the page, redacted c
   await clean(p);
 });
 
+let zipBytes = null;
 await check("footprint: reads a real Claude export .zip", async () => {
   const zlib = await import("node:zlib");
   const conv = [{ uuid: "u-1", name: "Taxes", created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z", chat_messages: [{ sender: "human", text: "my IBAN is GB82WEST12345698765432 and I owe back taxes", content: [] }] }];
@@ -324,15 +326,38 @@ await check("footprint: reads a real Claude export .zip", async () => {
   }
   const cd = Buffer.concat(central), eocd = Buffer.alloc(22);
   eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(2, 8); eocd.writeUInt16LE(2, 10); eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(off, 16);
+  zipBytes = Buffer.concat([...locals, cd, eocd]);
   const p = await page();
   await p.goto(BASE + "footprint/");
-  await p.setInputFiles("#file", { name: "data-2026.zip", mimeType: "application/zip", buffer: Buffer.concat([...locals, cd, eocd]) });
+  await p.setInputFiles("#file", { name: "data-2026.zip", mimeType: "application/zip", buffer: zipBytes });
   await p.waitForSelector("#report.show");
   assert((await p.locator("#rtitle").innerText()).includes("Claude"), "source not detected");
   assert((await p.locator("#t-pii").innerText()) === "1", "IBAN not counted");
   await p.locator(".conv summary").first().click();
   await p.waitForTimeout(150);
   assert(await p.locator('a[href="https://claude.ai/chat/u-1"]').count() === 1, "no link to open the chat in Claude");
+  await clean(p);
+});
+
+await check("footprint: export with an odd extension, and an unzipped export folder", async () => {
+  const p = await page();
+  await p.goto(BASE + "footprint/");
+  await p.setInputFiles("#file", { name: "data-2026-10-18.dms", mimeType: "application/octet-stream", buffer: zipBytes });
+  await p.waitForSelector("#report.show");
+  assert((await p.locator("#rtitle").innerText()).includes("Claude"), ".dms zip not read");
+  await p.goto(BASE + "footprint/");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fp-folder-"));
+  const conv = [{ uuid: "u-2", name: "Keys", chat_messages: [{ sender: "human", text: "my email is sam@mailbox-pro.net", content: [] }] }];
+  fs.writeFileSync(path.join(dir, "conversations.json"), JSON.stringify(conv));
+  fs.writeFileSync(path.join(dir, "users.json"), "[]");
+  await p.setInputFiles("#folder", dir);
+  await p.waitForSelector("#report.show");
+  assert((await p.locator("#rtitle").innerText()).includes("Claude"), "folder not read");
+  assert((await p.locator("#t-pii").innerText()) === "1", "email in folder export not counted");
+  await p.goto(BASE + "footprint/");
+  await p.setInputFiles("#file", { name: "IMG_0001.heic", mimeType: "image/heic", buffer: Buffer.from("\0\0\0 ftypheic") });
+  await p.waitForSelector("#err:not([hidden])");
+  assert(/not a zip or JSON file/.test(await p.locator("#err").innerText()), "no plain error for a wrong file");
   await clean(p);
 });
 

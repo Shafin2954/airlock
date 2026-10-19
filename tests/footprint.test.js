@@ -142,6 +142,41 @@ test("a zip without conversations.json gives a helpful error", async () => {
   await assert.rejects(F.load(makeZip({ "a.txt": "hi" }), "x.zip"), /no conversations\.json/);
 });
 
+// what a File from a folder pick or drop looks like
+const file = (path, content) => Object.assign(new Blob([content]), { name: path.split("/").pop(), path });
+const claudeConv = JSON.stringify([{ uuid: "c-1", name: "Hello", chat_messages: [{ sender: "human", text: "hi there", content: [] }] }]);
+
+test("an export zip with an odd extension (or none) is read by its contents", async () => {
+  const zip = makeZip({ "conversations.json": claudeConv });
+  const loaded = await F.loadFiles([Object.assign(zip, { name: "data-2026-10-18-12-00-00.dms" })]);
+  assert.equal(loaded.source, "claude");
+  assert.equal(loaded.conversations.length, 1);
+});
+
+test("an unzipped export folder: conversations.json and projects.json are found by path, the rest ignored", async () => {
+  const projects = JSON.stringify([{ uuid: "p-1", name: "Work", prompt_template: "I work at a hospital", docs: [] }]);
+  const loaded = await F.loadFiles([
+    file("/data-export/users.json", '[{"email_address":"x@y.z"}]'),
+    file("/data-export/conversations.json", claudeConv),
+    file("/data-export/projects.json", projects),
+    file("/data-export/.DS_Store", "\u0000\u0001junk"),
+  ]);
+  assert.equal(loaded.source, "claude");
+  assert.deepEqual(loaded.conversations.map((c) => c.title), ["Hello", "Project: Work"]);
+});
+
+test("several files that include the zip itself", async () => {
+  const zip = Object.assign(makeZip({ "conversations.json": claudeConv }), { name: "export" });
+  const loaded = await F.loadFiles([file("notes.txt", "hello"), zip]);
+  assert.equal(loaded.conversations.length, 1);
+});
+
+test("files that aren't an export get a plain explanation", async () => {
+  await assert.rejects(F.loadFiles([file("photo.heic", "\u0000\u0000ftypheic")]), /not a zip or JSON file/);
+  await assert.rejects(F.loadFiles([file("a.txt", "x"), file("b.txt", "y")]), /couldn't find conversations\.json/);
+  await assert.rejects(F.load(makeZip({ "a.txt": "hi" }), "x.zip"), /it contains: a\.txt/);
+});
+
 test("analysis finds secrets, identifiers, hidden text and sensitive topics in YOUR messages", async () => {
   const convs = [...F.parseChatGPT(chatgptExport()), ...F.parseClaude(claudeExport())];
   const rep = await F.analyze(convs);

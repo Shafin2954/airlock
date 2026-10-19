@@ -266,7 +266,10 @@
     if (await isZip(blob)) {
       const entries = await listZip(blob);
       const wanted = entries.filter((e) => /(^|\/)(conversations|projects)\.json$/i.test(e.name));
-      if (!wanted.length) throw new Error("this zip has no conversations.json — is it a ChatGPT or Claude data export?");
+      if (!wanted.length) {
+        const shown = entries.slice(0, 6).map((e) => e.name).join(", ") + (entries.length > 6 ? ", …" : "");
+        throw new Error("this zip has no conversations.json (it contains: " + (shown || "nothing") + "). Is it a ChatGPT or Claude data export?");
+      }
       let source = "generic";
       const conversations = [];
       const raw = [];
@@ -280,8 +283,38 @@
       return { source, name, conversations, raw };
     }
     const text = await blob.text();
+    if (!/^\uFEFF?\s*[[{]/.test(text.slice(0, 64))) {
+      throw new Error("“" + name + "” is not a zip or JSON file. Drop the export zip itself, the folder it unzipped to, or conversations.json from inside it.");
+    }
     const r = parseJSONText(text, name);
     return { source: r.source, name, conversations: r.conversations, raw: [{ name: name.split(/[\\/]/).pop(), text }] };
+  }
+
+  // Several files at once: a dropped or chosen folder (Safari unzips downloads automatically),
+  // or a multi-select. Each item: a File/Blob with .name and optionally .path (path inside the folder).
+  const EXPORT_JSON = /(^|[\\/])(conversations|projects)\.json$/i;
+  async function loadFiles(files, label) {
+    files = Array.from(files || []);
+    if (!files.length) throw new Error("nothing to open");
+    if (files.length === 1) return load(files[0], files[0].name);
+    const pathOf = (f) => f.path || f.webkitRelativePath || f.name || "";
+    let use = files.filter((f) => EXPORT_JSON.test(pathOf(f)));
+    if (!use.length) {
+      const zips = [];
+      for (const f of files) if (await isZip(f)) zips.push(f);
+      use = zips;
+    }
+    if (!use.length) throw new Error("couldn't find conversations.json in what you dropped. Drop the export zip, the folder it unzipped to, or conversations.json.");
+    let source = "generic";
+    const conversations = [];
+    const raw = [];
+    for (const f of use) {
+      const r = await load(f, pathOf(f));
+      if (r.source !== "generic") source = r.source;
+      conversations.push(...r.conversations);
+      raw.push(...r.raw);
+    }
+    return { source, name: label || (use.length === 1 ? pathOf(use[0]) : use.length + " files"), conversations, raw };
   }
 
   // ---------------------------------------------------------------- sensitive topics
@@ -504,5 +537,5 @@
     return { json: JSON.stringify(data), vault };
   }
 
-  return { load, listZip, readEntryText, isZip, parseJSONText, parseChatGPT, parseClaude, parseClaudeProjects, analyze, topicHits, redactExport, TOPICS };
+  return { load, loadFiles, listZip, readEntryText, isZip, parseJSONText, parseChatGPT, parseClaude, parseClaudeProjects, analyze, topicHits, redactExport, TOPICS };
 });

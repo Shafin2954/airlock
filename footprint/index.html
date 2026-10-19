@@ -126,10 +126,12 @@
       <div>
         <svg class="big" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M4 7l2-3h12l2 3M9 12h6"/></svg>
         <h2>Drop your export .zip here</h2>
-        <div class="muted">The zip itself works (only <code>conversations.json</code> is read), or the JSON file.</div>
+        <div class="muted">The zip, the folder it unzipped to, or <code>conversations.json</code>. Only the conversation files are read.</div>
         <div class="actions">
           <label class="btn primary" for="file">Choose export…</label>
-          <input type="file" id="file" accept=".zip,.json,.jsonl,application/zip,application/json" class="visually-hidden">
+          <input type="file" id="file" multiple class="visually-hidden">
+          <label class="btn" for="folder">Choose folder…</label>
+          <input type="file" id="folder" webkitdirectory class="visually-hidden">
           <button class="btn" id="sample" type="button">See a sample report</button>
         </div>
       </div>
@@ -155,6 +157,7 @@
         </ol>
       </div>
     </div>
+    <p class="assure"><b>Got a folder, not a zip?</b> Safari on Mac unzips downloads automatically. Drop the whole folder or use “Choose folder…”. If the download has an odd extension or none, drop it anyway: Footprint looks at what's inside the file, not its name.</p>
     <p class="assure">Menu names change from time to time; look for "export data" in each app's settings. This page has no server and is blocked from making network requests (Content-Security-Policy <code>connect-src 'none'</code>), so your export stays on your device. You can also save this page and run it offline.</p>
   </section>
 
@@ -230,11 +233,13 @@
     $("progress-text").textContent = text;
   }
 
-  async function open(file) {
+  async function open(fileOrFiles) {
+    const files = fileOrFiles instanceof Blob ? [fileOrFiles] : Array.from(fileOrFiles || []);
+    if (!files.length) return;
     $("err").hidden = true;
-    setProgress(5, "Opening " + (file.name || "export") + "…");
+    setProgress(5, "Opening " + (files.length === 1 ? files[0].name || "export" : files.length + " files") + "…");
     try {
-      const loaded = await F.load(file, file.name);
+      const loaded = await F.loadFiles(files);
       if (!loaded.conversations.length) throw new Error("No conversations found in that file.");
       st.loaded = loaded;
       await analyze();
@@ -458,7 +463,32 @@
 
   // ------------------------------------------------------------ inputs
 
-  $("file").addEventListener("change", (e) => e.target.files[0] && open(e.target.files[0]));
+  $("file").addEventListener("change", (e) => { open(e.target.files); e.target.value = ""; });
+  $("folder").addEventListener("change", (e) => { open(e.target.files); e.target.value = ""; });
+
+  // A dropped folder arrives as a directory entry; walk it and collect the files (with their paths).
+  function entryFiles(entry, out) {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        entry.file((f) => { try { Object.defineProperty(f, "path", { value: entry.fullPath }); } catch {} out.push(f); resolve(); }, () => resolve());
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const batch = () => reader.readEntries(async (list) => {
+          if (!list.length) return resolve();
+          for (const e of list) await entryFiles(e, out);
+          batch();
+        }, () => resolve());
+        batch();
+      } else resolve();
+    });
+  }
+  async function droppedFiles(dt) {
+    const entries = Array.from(dt.items || []).map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+    if (!entries.some((e) => e.isDirectory)) return Array.from(dt.files || []);
+    const out = [];
+    for (const e of entries) await entryFiles(e, out);
+    return out;
+  }
   const drop = $("drop");
   ["dragenter", "dragover"].forEach((ev) =>
     document.addEventListener(ev, (e) => {
@@ -473,9 +503,9 @@
       drop.classList.remove("over");
     })
   );
-  document.addEventListener("drop", (e) => {
-    const f = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (f) open(f);
+  document.addEventListener("drop", async (e) => {
+    const files = await droppedFiles(e.dataTransfer);
+    if (files.length) open(files);
   });
 
   // ------------------------------------------------------------ sample (fake data, ChatGPT shape)
