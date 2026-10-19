@@ -25,7 +25,7 @@
   .progress.show { display: block; }
   .bar { height: 6px; background: var(--panel-2); border-radius: 999px; overflow: hidden; }
   .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .15s; }
-  .howto { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+  .howto { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
   @media (max-width: 700px) { .howto { grid-template-columns: 1fr; } }
   .howto .panel { padding: 14px 16px; font-size: 14px; color: var(--ink-2); }
   .howto h3 { margin: 0 0 6px; font-size: 15px; color: var(--ink); }
@@ -33,6 +33,11 @@
   .howto li { margin: 2px 0; }
   .assure { margin-top: 18px; font-size: 13.5px; color: var(--ink-2); }
   .err { color: var(--bad); margin-top: 12px; text-align: center; }
+  .manifest { margin-top: 14px; padding: 16px 18px; }
+  .manifest h3 { margin: 0 0 6px; }
+  .manifest ul { margin: 10px 0 0; padding-left: 18px; }
+  .manifest li { margin: 4px 0; }
+  .manifest li.skip a { color: var(--ink-3); }
 
   /* ---------- report */
   .report { display: none; padding-top: 22px; }
@@ -120,13 +125,13 @@
   <!-- ------------------------------------------------------------ LANDING -->
   <section class="landing" id="landing">
     <h1>What have you told AI?</h1>
-    <p class="lead">Drop in your ChatGPT or Claude data export. Footprint finds the API keys, passwords, account numbers, addresses and private topics you've shared, shows which chats to delete, and makes a redacted copy. Your history never leaves this tab.</p>
+    <p class="lead">Drop in your ChatGPT or Claude data export, or your Claude Code sessions. Footprint finds the API keys, passwords, account numbers, addresses and private topics you've shared, shows which chats to delete, and makes a redacted copy. Your history never leaves this tab.</p>
 
     <div class="dropzone" id="drop">
       <div>
         <svg class="big" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16v12H4z"/><path d="M4 7l2-3h12l2 3M9 12h6"/></svg>
-        <h2>Drop your export .zip here</h2>
-        <div class="muted">The zip, the folder it unzipped to, or <code>conversations.json</code>. Only the conversation files are read.</div>
+        <h2>Drop your export here</h2>
+        <div class="muted">One zip or several, a folder, or the JSON inside. Only conversation data is read.</div>
         <div class="actions">
           <label class="btn primary" for="file">Choose export…</label>
           <input type="file" id="file" multiple class="visually-hidden">
@@ -138,6 +143,11 @@
     </div>
     <div class="progress" id="progress"><div class="bar"><i></i></div><div class="small muted" id="progress-text" style="margin-top:6px;text-align:center"></div></div>
     <div class="err" id="err" hidden></div>
+    <div class="panel manifest" id="manifest" hidden>
+      <h3>That's the index file. Your data is in the zips it lists.</h3>
+      <p class="muted small">Download these (each link works for 24 hours and may only work once, so let each download finish), then drop all the zips here together. Footprint can't fetch them for you: this page has no network access, by design.</p>
+      <ul></ul>
+    </div>
 
     <div class="howto">
       <div class="panel">
@@ -151,9 +161,17 @@
       <div class="panel">
         <h3>Get your Claude export</h3>
         <ol>
-          <li>Settings → <b>Privacy</b> → <b>Export data</b></li>
-          <li>A download link arrives by email</li>
-          <li>Drop the downloaded <code>.zip</code> here</li>
+          <li>On claude.ai: Settings → <b>Privacy</b> → <b>Export data</b></li>
+          <li>The email links to a small JSON index. Drop it here to get the list of zips</li>
+          <li>Download <code>conversations</code>, <code>projects</code>, <code>memories</code> and <code>claude_code_cloud</code>, and drop them all here together</li>
+        </ol>
+      </div>
+      <div class="panel">
+        <h3>Scan Claude Code on your computer</h3>
+        <ol>
+          <li>Claude Code keeps every session in <code>~/.claude/projects</code></li>
+          <li>“Choose folder…” and pick that folder (on a Mac, press <kbd>⌘ ⇧ .</kbd> to show hidden folders)</li>
+          <li>Findings in files Claude read or commands it ran are marked as tool output</li>
         </ol>
       </div>
     </div>
@@ -223,7 +241,7 @@
   const $ = (id) => document.getElementById(id);
 
   const st = { loaded: null, report: null, filter: "flagged", q: "", limit: 80 };
-  const PROVIDER = { chatgpt: "ChatGPT", claude: "Claude", generic: "the source" };
+  const PROVIDER = { chatgpt: "ChatGPT", claude: "Claude", "claude-code": "Claude Code", generic: "the source" };
 
   // ------------------------------------------------------------ load + analyze
 
@@ -237,6 +255,7 @@
     const files = fileOrFiles instanceof Blob ? [fileOrFiles] : Array.from(fileOrFiles || []);
     if (!files.length) return;
     $("err").hidden = true;
+    $("manifest").hidden = true;
     setProgress(5, "Opening " + (files.length === 1 ? files[0].name || "export" : files.length + " files") + "…");
     try {
       const loaded = await F.loadFiles(files);
@@ -245,9 +264,34 @@
       await analyze();
     } catch (e) {
       $("progress").classList.remove("show");
+      if (e.manifest) return showManifest(e.manifest);
       $("err").hidden = false;
       $("err").textContent = "Couldn't read that file: " + e.message;
     }
+  }
+
+  // The claude.ai export email links to an index JSON; it lists one zip per kind of data.
+  // This page can't fetch them (it has no network access), so it lists them as plain links.
+  function showManifest(m) {
+    const box = $("manifest");
+    const ul = box.querySelector("ul");
+    ul.innerHTML = "";
+    for (const f of m.files) {
+      const li = document.createElement("li");
+      if (!f.info.read) li.className = "skip";
+      const a = document.createElement("a");
+      a.href = /^https:\/\/claude\.ai\//.test(f.export_url || "") ? f.export_url : "#";
+      a.target = "_blank";
+      a.rel = "noreferrer noopener";
+      a.textContent = f.filename || f.category;
+      const d = document.createElement("span");
+      d.className = "muted";
+      d.textContent = " — " + f.info.label;
+      li.append(a, d);
+      ul.append(li);
+    }
+    box.hidden = false;
+    box.scrollIntoView({ block: "nearest" });
   }
 
   async function analyze() {
@@ -380,7 +424,7 @@
       const hits = c.hits.slice(0, 60);
       d.querySelector(".hits").innerHTML =
         (hits.length
-          ? hits.map((h) => '<div class="hit ' + (h.kind === "topic" ? "" : h.kind) + '"><div class="hl">' + esc(h.label) + (h.role === "assistant" ? " · in an AI reply" : "") + '</div><div class="sn">' + esc(h.snippet) + "</div></div>").join("")
+          ? hits.map((h) => '<div class="hit ' + (h.kind === "topic" ? "" : h.kind) + '"><div class="hl">' + esc(h.label) + (h.role === "assistant" ? " · in an AI reply" : h.where === "tool-input" ? " · in a command or file Claude wrote" + (h.tool ? " (" + h.tool + ")" : "") : h.where === "tool-output" ? " · in tool output Claude read" : "") + '</div><div class="sn">' + esc(h.snippet) + "</div></div>").join("")
           : '<div class="muted small" style="padding-top:6px">Nothing sensitive found in this chat.</div>') +
         (c.hits.length > hits.length ? '<div class="muted small" style="margin-top:6px">…and ' + (c.hits.length - hits.length) + " more</div>" : "") +
         (c.url ? '<a class="btn small open" href="' + esc(c.url) + '" target="_blank" rel="noopener noreferrer">Open in ' + esc(st.src || "app") + " to delete ↗</a>" : "");
@@ -427,10 +471,16 @@
   // ------------------------------------------------------------ exports
 
   $("dl-redacted").addEventListener("click", () => {
+    const seen = new Map();
+    let shared = null;
     for (const r of st.loaded.raw || []) {
       try {
-        const out = F.redactExport(r.text);
-        download("redacted-" + r.name, out.json, "application/json");
+        const out = F.redactExport(r.text, shared);
+        shared = out.vault; // one numbering across all files: the same email is [EMAIL_1] everywhere
+        const n = (seen.get(r.name) || 0) + 1;
+        seen.set(r.name, n);
+        const name = n > 1 ? r.name.replace(/(\.jsonl?)?$/i, "-" + n + "$1") : r.name;
+        download("redacted-" + name, out.json, out.jsonl ? "application/x-ndjson" : "application/json");
       } catch (e) {
         toast("Couldn't redact " + r.name + ": " + e.message);
         return;

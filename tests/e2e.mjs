@@ -361,6 +361,49 @@ await check("footprint: export with an odd extension, and an unzipped export fol
   await clean(p);
 });
 
+await check("footprint: the export email's index JSON shows the zips to download", async () => {
+  const p = await page();
+  await p.goto(BASE + "footprint/");
+  const manifest = { data_files: [
+    { export_url: "https://claude.ai/export/x/download/1", category: "light_metadata", filename: "light_metadata-000.zip" },
+    { export_url: "https://claude.ai/export/x/download/2", category: "conversations", filename: "conversations-000.zip" },
+    { export_url: "javascript:alert(1)", category: "projects", filename: "projects-000.zip" },
+  ] };
+  await p.setInputFiles("#file", { name: "claude-export.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(manifest)) });
+  await p.waitForSelector("#manifest:not([hidden])");
+  const links = await p.locator("#manifest a").evaluateAll((as) => as.map((a) => [a.textContent, a.getAttribute("href"), a.rel]));
+  assert(links.length === 3 && links[1][0] === "conversations-000.zip" && links[1][1] === "https://claude.ai/export/x/download/2", JSON.stringify(links));
+  assert(links[2][1] === "#", "only claude.ai links are clickable");
+  assert(/noreferrer/.test(links[1][2]));
+  assert(await p.locator("#err").isHidden(), "no error shown for the index file");
+  await clean(p);
+});
+
+await check("footprint: a Claude Code projects folder, with tool-output findings labelled", async () => {
+  const p = await page();
+  await p.goto(BASE + "footprint/");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fp-cc-"));
+  fs.mkdirSync(path.join(dir, "-home-me-shop"));
+  const k = ["sk-ant-", "api03-", "Zq8xR2vN7mK4pL9wT3yB6cH1jF5dG0sA", "-e2Qr8Tz4Ux6Wv1Yb3Nm5"].join("");
+  const lines = [
+    { type: "user", sessionId: "s-1", cwd: "/home/me/shop", message: { role: "user", content: "why does deploy fail?" } },
+    { type: "assistant", sessionId: "s-1", message: { role: "assistant", content: [{ type: "tool_use", name: "Read", input: { file_path: "/home/me/shop/.env" } }] } },
+    { type: "user", sessionId: "s-1", message: { role: "user", content: [{ type: "tool_result", content: "ANTHROPIC_API_KEY=" + k }] } },
+    { type: "ai-title", sessionId: "s-1", aiTitle: "Fix deploy" },
+  ];
+  fs.writeFileSync(path.join(dir, "-home-me-shop", "s-1.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n"));
+  await p.setInputFiles("#folder", dir);
+  await p.waitForSelector("#report.show");
+  assert((await p.locator("#rtitle").innerText()).includes("Claude Code"), await p.locator("#rtitle").innerText());
+  assert((await p.locator("#t-secret").innerText()) === "1", "key in tool output not counted");
+  await p.locator(".conv summary").first().click();
+  await p.waitForTimeout(150);
+  const body = await p.locator("#report").innerText();
+  assert(/in tool output Claude read/.test(body), "tool output label missing");
+  assert(!body.includes(k), "key shown in full");
+  await clean(p);
+});
+
 for (const t of ["", "scrub/", "context-map/", "jsonl-lens/", "footprint/"]) {
   await check(`no horizontal scroll at 375px: /${t}`, async () => {
     const p = await page({ viewport: { width: 375, height: 760 }, scheme: "dark" });

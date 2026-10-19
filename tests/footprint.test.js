@@ -139,7 +139,7 @@ test("reads conversations.json straight out of an export zip (and ignores the re
 });
 
 test("a zip without conversations.json gives a helpful error", async () => {
-  await assert.rejects(F.load(makeZip({ "a.txt": "hi" }), "x.zip"), /no conversations\.json/);
+  await assert.rejects(F.load(makeZip({ "a.txt": "hi" }), "x.zip"), /couldn.t find any conversations.*a\.txt/);
 });
 
 // what a File from a folder pick or drop looks like
@@ -173,8 +173,8 @@ test("several files that include the zip itself", async () => {
 
 test("files that aren't an export get a plain explanation", async () => {
   await assert.rejects(F.loadFiles([file("photo.heic", "\u0000\u0000ftypheic")]), /not a zip or JSON file/);
-  await assert.rejects(F.loadFiles([file("a.txt", "x"), file("b.txt", "y")]), /couldn't find conversations\.json/);
-  await assert.rejects(F.load(makeZip({ "a.txt": "hi" }), "x.zip"), /it contains: a\.txt/);
+  await assert.rejects(F.loadFiles([file("a.txt", "x"), file("b.txt", "y")]), /couldn.t find any conversations/);
+  await assert.rejects(F.load(makeZip({ "a.txt": "hi" }), "x.zip"), /x\.zip \(a\.txt\)/);
 });
 
 test("analysis finds secrets, identifiers, hidden text and sensitive topics in YOUR messages", async () => {
@@ -249,4 +249,93 @@ test("no excerpt reveals any part of a secret, even a neighbouring one", async (
 
 test("'born in 1990' counts as identity", () => {
   assert.equal(F.topicHits("I was born in 1990 in Dhaka.")[0].topic, "identity");
+});
+
+// ------------------------------------------------------------ claude.ai multi-part export + Claude Code
+
+const key = () => ["sk-ant-", "api03-", "Zq8xR2vN7mK4pL9wT3yB6cH1jF5dG0sA", "-e2Qr8Tz4Ux6Wv1Yb3Nm5"].join("");
+const ccLines = (sessionId, cwd) => [
+  { type: "queue-operation", sessionId, operation: "enqueue" },
+  { type: "user", sessionId, cwd, timestamp: "2026-10-01T10:00:00Z", message: { role: "user", content: "deploy is failing, my doctor says I need surgery so be quick" } },
+  { type: "user", sessionId, cwd, isMeta: true, message: { role: "user", content: [{ type: "text", text: "<system-reminder>injected</system-reminder>" }] } },
+  { type: "assistant", sessionId, message: { role: "assistant", content: [{ type: "thinking", thinking: "hmm" }, { type: "tool_use", name: "Bash", input: { command: "cat .env", description: "read env" } }] } },
+  { type: "user", sessionId, message: { role: "user", content: [{ type: "tool_result", content: "ANTHROPIC_API_KEY=" + key() + "\nDEBUG=1" }] } },
+  { type: "assistant", sessionId, message: { role: "assistant", content: [{ type: "text", text: "Found it." }] } },
+  { type: "ai-title", sessionId, aiTitle: "Fix failing deploy" },
+].map((o) => JSON.stringify(o)).join("\n");
+
+test("Claude Code transcripts: grouped by session, tool output scanned, meta lines skipped", async () => {
+  const r = F.parseJSONText(ccLines("s-1", "/home/me/shop") + "\n" + ccLines("s-2", "/home/me/blog"), "x.jsonl");
+  assert.equal(r.source, "claude-code");
+  assert.equal(r.conversations.length, 2);
+  const c = r.conversations[0];
+  assert.equal(c.title, "Fix failing deploy");
+  assert.equal(c.project, "/home/me/shop");
+  assert.deepEqual(c.messages.map((m) => m.role + ":" + m.kind), ["user:message", "tool:tool-input", "tool:tool-output", "assistant:message"]);
+  const report = await F.analyze(r.conversations);
+  const hits = report.conversations[0].hits;
+  const secret = hits.find((h) => h.kind === "secret");
+  assert.equal(secret.where, "tool-output");
+  assert.ok(hits.some((h) => h.kind === "topic" && h.role === "user"), "topics from your own words");
+  assert.ok(!hits.some((h) => h.kind === "topic" && h.role === "tool"), "no topics from tool output");
+  assert.ok(!JSON.stringify(report).includes(key()), "the key itself never appears in the report");
+  const off = await F.analyze(r.conversations, { includeTools: false });
+  assert.ok(!off.conversations[0].hits.some((h) => h.kind === "secret"));
+});
+
+test("a ~/.claude/projects folder: every .jsonl session is read", async () => {
+  const loaded = await F.loadFiles([
+    file("/projects/-home-me-shop/s-1.jsonl", ccLines("s-1", "/home/me/shop")),
+    file("/projects/-home-me-blog/s-2.jsonl", ccLines("s-2", "/home/me/blog")),
+    file("/projects/-home-me-blog/s-2/notes.txt", "x"),
+  ]);
+  assert.equal(loaded.source, "claude-code");
+  assert.equal(loaded.conversations.length, 2);
+});
+
+test("the export email's index JSON: a helpful list of the zips to download, not an error", async () => {
+  const manifest = {
+    instructions: "Download each file using the export_url.",
+    created_at: "2026-10-19T20:56:59Z",
+    total_files: 3,
+    data_files: [
+      { batch_index: 0, export_url: "https://claude.ai/export/x/download/1", category: "light_metadata", part: 0, filename: "light_metadata-000.zip" },
+      { batch_index: 1, export_url: "https://claude.ai/export/x/download/2", category: "conversations", part: 0, filename: "conversations-000.zip" },
+      { batch_index: 2, export_url: "https://claude.ai/export/x/download/3", category: "frames", part: 0, filename: "frames-000.zip" },
+    ],
+    version: "1.0",
+  };
+  const err = await F.loadFiles([file("export.json", JSON.stringify(manifest))]).catch((e) => e);
+  assert.match(err.message, /index file/);
+  assert.deepEqual(err.manifest.files.map((f) => f.filename + ":" + f.info.read), ["light_metadata-000.zip:false", "conversations-000.zip:true", "frames-000.zip:false"]);
+});
+
+test("the new multi-zip claude.ai export: chats, projects, memories and Claude Code together; metadata skipped", async () => {
+  const conv = { uuid: "c-9", name: "Rent", chat_messages: [{ sender: "human", text: "my IBAN is GB82WEST12345698765432", content: [] }] };
+  const zips = [
+    Object.assign(makeZip({ "conversations/c-9.json": JSON.stringify(conv) }), { name: "conversations-000.zip" }),
+    Object.assign(makeZip({ "projects.json": JSON.stringify([{ uuid: "p-1", name: "Work", prompt_template: "I live in Leeds", docs: [] }]) }), { name: "projects-000.zip" }),
+    Object.assign(makeZip({ "memories.json": JSON.stringify({ memory: "User's email is sam@mailbox-pro.net" }) }), { name: "memories-000.zip" }),
+    Object.assign(makeZip({ "sessions/s-1.jsonl": ccLines("s-1", "/w") }), { name: "claude_code_cloud-000.zip" }),
+    Object.assign(makeZip({ "users.json": '[{"uuid":"u","full_name":"Sam"}]' }), { name: "light_metadata-000.zip" }),
+    file("export-index.json", JSON.stringify({ data_files: [{ export_url: "https://claude.ai/x", category: "conversations" }] })),
+  ];
+  const loaded = await F.loadFiles(zips);
+  assert.equal(loaded.source, "claude");
+  assert.deepEqual(loaded.conversations.map((c) => c.title), ["Rent", "Project: Work", "Memory", "Fix failing deploy"]);
+  assert.deepEqual(loaded.skipped, ["users.json"]);
+  const report = await F.analyze(loaded.conversations);
+  assert.equal(report.totals.secrets, 1);
+  assert.ok(report.totals.identifiers >= 2, "IBAN and the email in memories");
+});
+
+test("redacted copy of a Claude Code transcript stays JSONL, with one numbering across files", () => {
+  const a = F.redactExport(ccLines("s-1", "/w"));
+  assert.equal(a.jsonl, true);
+  const lines = a.json.split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 7);
+  assert.ok(!a.json.includes(key()));
+  assert.match(lines[4].message.content[0].content, /ANTHROPIC_API_KEY=\[[A-Z_]+_1\]/);
+  const b = F.redactExport(ccLines("s-2", "/w"), a.vault);
+  assert.match(b.json, /\[[A-Z_]+_1\]/, "same key, same placeholder in the second file");
 });

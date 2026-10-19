@@ -35,7 +35,7 @@ Every day people paste `.env` files, stack traces with tokens in them, and whole
 
 <img src="docs/screenshots/footprint.png" alt="Footprint report for a ChatGPT export: 3 secrets, 3 identifiers, 1 hidden-text finding and 7 chats with sensitive topics" width="900">
 
-ChatGPT and Claude both let you download everything you've ever typed. People paste API keys, `.env` files, bank details, medical worries and work secrets into those chats and forget. Footprint reads your export **in your browser** and shows you what's in it:
+ChatGPT and Claude both let you download everything you've ever typed, and Claude Code keeps every session on your disk. People paste API keys, `.env` files, bank details, medical worries and work secrets into those chats and forget, and coding agents read `.env` files and print configs on their own. Footprint reads your export or sessions **in your browser** and shows you what's in it:
 
 - **Secrets to rotate:** API keys, tokens, passwords in URLs and the like (Scrub's 29 secret detectors). If one is listed, treat it as exposed, even after deleting the chat.
 - **Personal identifiers:** emails, phone numbers, card numbers (Luhn-checked), IBANs (checksum-checked), US SSNs, IP addresses.
@@ -43,9 +43,15 @@ ChatGPT and Claude both let you download everything you've ever typed. People pa
 - **Sensitive topics:** health, money, legal, relationships, where you live, identity & documents, confidential work. Counted only in sentences where you talk about yourself ("I", "my"…); uploaded files and custom instructions count regardless. This part is keyword-based: expect some misses and some noise.
 - **What to do:** chats ranked by exposure, each with a link to open it in ChatGPT or Claude and delete it, plus a checklist report (`.md`) and a **redacted copy** of your export with every finding replaced by a placeholder.
 
-It reads the export `.zip` directly (only `conversations.json`, and `projects.json` for Claude; images are never read) via the zip's central directory, so multi-gigabyte exports are fine. In our test (Node), a 19 MB export with 40,000 messages was analysed in about a second. Values are never shown in full anywhere in the report, including excerpts.
+It reads export zips directly (only their JSON files; images are never read) via the zip's central directory, so multi-gigabyte exports are fine. You can drop one zip or several, the folder a zip unzipped to (Safari does this automatically), or the JSON inside; files are recognised by content, not extension. In our test (Node), a 19 MB export with 40,000 messages was analysed in about a second. Values are never shown in full anywhere in the report, including excerpts.
 
-How to get your export: **ChatGPT**: Settings → Data controls → Export data. **Claude**: Settings → Privacy → Export data. Both email you a download link. (Menu names change; look for "export data".) Deleting a chat removes it from your history; providers may keep data for a period under their own policies, and saved **memories** are separate from chats, so review those too.
+How to get your data:
+
+- **ChatGPT:** Settings → Data controls → Export data. The email links to one zip.
+- **Claude:** on claude.ai, Settings → Privacy → Export data. The email links to a small JSON index that lists several zips (`conversations`, `projects`, `memories`, `claude_code_cloud`, …). Drop the index into Footprint to get clickable links, download the zips, then drop them in together. Links expire after 24 hours and may work only once.
+- **Claude Code (local):** every session is a `.jsonl` file under `~/.claude/projects`. Use “Choose folder…” on that folder. Your prompts are scanned along with **tool traffic**: files Claude read, command output, commands it ran and files it wrote. That's where keys usually leak, and those findings are labelled separately.
+
+Menu names change; look for "export data". Deleting a chat removes it from your history; providers may keep data for a period under their own policies, and saved **memories** are separate from chats, so review those too.
 
 ## Scrub
 

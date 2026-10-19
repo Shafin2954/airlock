@@ -226,9 +226,82 @@
     });
   }
 
+  // Claude Code transcripts (~/.claude/projects/<project>/<session>.jsonl, and the
+  // claude_code_cloud part of a claude.ai export): one JSON object per line, grouped by sessionId.
+  // Keys mostly leak through tools here, so tool output (files read, command output) and tool input
+  // (commands run, files written) are kept as role "tool".
+  function blockText(c) {
+    if (typeof c === "string") return c;
+    if (!Array.isArray(c)) return "";
+    return c.map((b) => (typeof b === "string" ? b : b && typeof b.text === "string" ? b.text : "")).filter(Boolean).join("\n");
+  }
+  function toolInputText(input) {
+    if (!input || typeof input !== "object") return "";
+    return Object.values(input)
+      .map((v) => (typeof v === "string" ? v : v && typeof v === "object" ? JSON.stringify(v) : ""))
+      .filter(Boolean)
+      .join("\n");
+  }
+  function parseClaudeCode(list) {
+    const sessions = new Map();
+    for (const o of list) {
+      if (!o || typeof o !== "object" || !o.sessionId) continue;
+      let s = sessions.get(o.sessionId);
+      if (!s) sessions.set(o.sessionId, (s = { id: o.sessionId, title: "", cwd: "", created: null, updated: null, messages: [] }));
+      if (o.type === "ai-title" && o.aiTitle) s.title = o.aiTitle;
+      if (o.type === "summary" && o.summary && !s.title) s.title = o.summary;
+      if (o.cwd && !s.cwd) s.cwd = o.cwd;
+      const time = o.timestamp ? Date.parse(o.timestamp) : null;
+      if (time) {
+        s.created = s.created == null ? time : Math.min(s.created, time);
+        s.updated = Math.max(s.updated || 0, time);
+      }
+      const m = o.message;
+      if (!m || typeof m !== "object") continue;
+      const push = (role, text, kind, name) => text && text.trim() && s.messages.push({ role, text, time, kind, name });
+      if (o.type === "user") {
+        if (typeof m.content === "string") {
+          if (!o.isMeta) push("user", m.content, "message");
+        } else if (Array.isArray(m.content)) {
+          for (const b of m.content) {
+            if (!b || typeof b !== "object") continue;
+            if (b.type === "text" && !o.isMeta) push("user", b.text, "message");
+            else if (b.type === "tool_result") push("tool", blockText(b.content), "tool-output");
+          }
+        }
+      } else if (o.type === "assistant" && Array.isArray(m.content)) {
+        for (const b of m.content) {
+          if (!b || typeof b !== "object") continue;
+          if (b.type === "text") push("assistant", b.text, "message");
+          else if (b.type === "tool_use") push("tool", toolInputText(b.input), "tool-input", b.name);
+        }
+      }
+    }
+    return Array.from(sessions.values())
+      .filter((s) => s.messages.length)
+      .map((s) => ({
+        id: s.id,
+        title: s.title || (s.cwd ? s.cwd.split(/[\\/]/).filter(Boolean).pop() + " session" : "Claude Code session"),
+        source: "claude-code",
+        url: null,
+        project: s.cwd || "",
+        created: s.created,
+        updated: s.updated,
+        messages: s.messages,
+      }));
+  }
+
   function shapeOf(data) {
-    const first = Array.isArray(data) ? data.find((x) => x && typeof x === "object") : null;
-    if (!first) return "generic";
+    if (data && !Array.isArray(data) && typeof data === "object") {
+      if (Array.isArray(data.data_files) && data.data_files.some((f) => f && f.export_url)) return "manifest";
+      if (Array.isArray(data.chat_messages)) return "claude";
+      if (data.mapping) return "chatgpt";
+      return "generic";
+    }
+    const objs = Array.isArray(data) ? data.slice(0, 200).filter((x) => x && typeof x === "object") : [];
+    if (!objs.length) return "generic";
+    if (objs.some((o) => o.sessionId && o.message && typeof o.message === "object")) return "claude-code";
+    const first = objs[0];
     if (first.mapping) return "chatgpt";
     if (Array.isArray(first.chat_messages)) return "claude";
     if (Array.isArray(first.docs) || "prompt_template" in first) return "claude-projects";
@@ -254,67 +327,103 @@
         });
     }
     const shape = shapeOf(data);
-    if (shape === "chatgpt") return { source: "chatgpt", conversations: parseChatGPT(data) };
-    if (shape === "claude") return { source: "claude", conversations: parseClaude(data) };
-    if (shape === "claude-projects") return { source: "claude", conversations: parseClaudeProjects(data) };
+    const list = Array.isArray(data) ? data : [data];
+    if (shape === "manifest") return { source: "manifest", conversations: [], manifest: data };
+    if (shape === "chatgpt") return { source: "chatgpt", conversations: parseChatGPT(list) };
+    if (shape === "claude") return { source: "claude", conversations: parseClaude(list) };
+    if (shape === "claude-projects") return { source: "claude", conversations: parseClaudeProjects(list) };
+    if (shape === "claude-code") return { source: "claude-code", conversations: parseClaudeCode(list) };
     return { source: "generic", conversations: parseGeneric(data, name) };
   }
 
-  // Load a File/Blob: a ChatGPT/Claude export zip, a conversations.json, or any JSON/JSONL.
-  async function load(blob, name) {
-    name = name || blob.name || "export";
-    if (await isZip(blob)) {
-      const entries = await listZip(blob);
-      const wanted = entries.filter((e) => /(^|\/)(conversations|projects)\.json$/i.test(e.name));
-      if (!wanted.length) {
-        const shown = entries.slice(0, 6).map((e) => e.name).join(", ") + (entries.length > 6 ? ", …" : "");
-        throw new Error("this zip has no conversations.json (it contains: " + (shown || "nothing") + "). Is it a ChatGPT or Claude data export?");
-      }
-      let source = "generic";
-      const conversations = [];
-      const raw = [];
-      for (const e of wanted) {
-        const text = await readEntryText(blob, e);
-        const r = parseJSONText(text, e.name);
-        if (r.source !== "generic") source = r.source;
-        conversations.push(...r.conversations);
-        raw.push({ name: e.name.split("/").pop(), text });
-      }
-      return { source, name, conversations, raw };
-    }
-    const text = await blob.text();
-    if (!/^\uFEFF?\s*[[{]/.test(text.slice(0, 64))) {
-      throw new Error("“" + name + "” is not a zip or JSON file. Drop the export zip itself, the folder it unzipped to, or conversations.json from inside it.");
-    }
-    const r = parseJSONText(text, name);
-    return { source: r.source, name, conversations: r.conversations, raw: [{ name: name.split(/[\\/]/).pop(), text }] };
+  // What each part of a claude.ai export holds (the email now links to several zips plus an index JSON).
+  const EXPORT_PARTS = {
+    conversations: { label: "Your chats", read: true },
+    projects: { label: "Project instructions and documents", read: true },
+    memories: { label: "What Claude remembers about you", read: true },
+    claude_code_cloud: { label: "Claude Code on the web sessions", read: true },
+    frames: { label: "Not scanned", read: false },
+    light_metadata: { label: "Account details (not scanned)", read: false },
+  };
+
+  function manifestError(manifest) {
+    const files = (manifest.data_files || []).map((f) => Object.assign({ info: EXPORT_PARTS[f.category] || { label: f.category || "", read: true } }, f));
+    const e = new Error("this is the export's index file, not your data. Download the zips it lists, then drop them here together.");
+    e.manifest = { files, created: manifest.created_at || null, instructions: manifest.instructions || "" };
+    return e;
   }
 
-  // Several files at once: a dropped or chosen folder (Safari unzips downloads automatically),
-  // or a multi-select. Each item: a File/Blob with .name and optionally .path (path inside the folder).
-  const EXPORT_JSON = /(^|[\\/])(conversations|projects)\.json$/i;
+  // Collects recognised conversations from one file (a zip, JSON or JSONL) into acc.
+  // strict: unrecognised JSON is skipped (zips, folders); otherwise it's read generically.
+  async function ingest(blob, name, acc, strict) {
+    if (await isZip(blob)) {
+      const entries = (await listZip(blob)).filter((e) => /\.jsonl?$/i.test(e.name) && !/(^|\/)(__MACOSX|\.)/.test(e.name));
+      if (!entries.length) {
+        const all = (await listZip(blob)).map((e) => e.name);
+        acc.skipped.push(name + " (" + (all.slice(0, 6).join(", ") || "empty") + (all.length > 6 ? ", …" : "") + ")");
+        return;
+      }
+      for (const e of entries) await ingestText(await readEntryText(blob, e), e.name, acc, true);
+      return;
+    }
+    const text = await blob.text();
+    if (!/^﻿?\s*[[{]/.test(text.slice(0, 64))) {
+      if (strict) return void acc.skipped.push(name);
+      throw new Error("“" + name + "” is not a zip or JSON file. Drop the export zip(s), the folder they unzipped to, or the JSON inside.");
+    }
+    await ingestText(text, name, acc, strict);
+  }
+
+  async function ingestText(text, name, acc, strict) {
+    const r = parseJSONText(text, name);
+    const short = name.split(/[\\/]/).pop();
+    if (r.manifest) return void (acc.manifest = r.manifest);
+    if (r.source === "generic") {
+      if (/memor/i.test(name)) {
+        // memories: whatever the shape, it's about you; scan every string
+        r.conversations.forEach((c, i) => Object.assign(c, { title: "Memory" + (r.conversations.length > 1 ? " " + (i + 1) : ""), source: "claude" }));
+      } else if (strict) return void acc.skipped.push(short);
+    }
+    if (!r.conversations.length) return void acc.skipped.push(short);
+    acc.sources.add(r.source);
+    acc.conversations.push(...r.conversations);
+    acc.raw.push({ name: short, text });
+  }
+
+  function finish(acc, name) {
+    if (!acc.conversations.length) {
+      if (acc.manifest) throw manifestError(acc.manifest);
+      throw new Error("couldn't find any conversations" + (acc.skipped.length ? " (looked in: " + acc.skipped.slice(0, 6).join(", ") + (acc.skipped.length > 6 ? ", …" : "") + ")" : "") + ". Is this a ChatGPT, Claude or Claude Code export?");
+    }
+    const src = acc.sources;
+    const source = src.has("chatgpt") ? "chatgpt" : src.has("claude") ? "claude" : src.has("claude-code") ? "claude-code" : "generic";
+    return { source, name, conversations: acc.conversations, raw: acc.raw, skipped: acc.skipped };
+  }
+
+  const newAcc = () => ({ conversations: [], raw: [], skipped: [], sources: new Set(), manifest: null });
+
+  // Load one File/Blob: an export zip, conversations.json, a Claude Code .jsonl, or any JSON/JSONL.
+  async function load(blob, name) {
+    name = name || blob.name || "export";
+    const acc = newAcc();
+    await ingest(blob, name, acc, false);
+    return finish(acc, name);
+  }
+
+  // Several files at once: a chosen or dropped folder (Safari unzips downloads; ~/.claude/projects),
+  // the zips from a claude.ai export, or a multi-select. Items: File/Blob with .name and maybe .path.
   async function loadFiles(files, label) {
     files = Array.from(files || []);
     if (!files.length) throw new Error("nothing to open");
     if (files.length === 1) return load(files[0], files[0].name);
     const pathOf = (f) => f.path || f.webkitRelativePath || f.name || "";
-    let use = files.filter((f) => EXPORT_JSON.test(pathOf(f)));
-    if (!use.length) {
-      const zips = [];
-      for (const f of files) if (await isZip(f)) zips.push(f);
-      use = zips;
+    const acc = newAcc();
+    for (const f of files) {
+      const p = pathOf(f);
+      if (/(^|[\\/])\.[^\\/]*$/.test(p)) continue; // .DS_Store and friends
+      if (/\.(jsonl?|zip)$/i.test(p) || (await isZip(f))) await ingest(f, p, acc, true);
     }
-    if (!use.length) throw new Error("couldn't find conversations.json in what you dropped. Drop the export zip, the folder it unzipped to, or conversations.json.");
-    let source = "generic";
-    const conversations = [];
-    const raw = [];
-    for (const f of use) {
-      const r = await load(f, pathOf(f));
-      if (r.source !== "generic") source = r.source;
-      conversations.push(...r.conversations);
-      raw.push(...r.raw);
-    }
-    return { source, name: label || (use.length === 1 ? pathOf(use[0]) : use.length + " files"), conversations, raw };
+    return finish(acc, label || (files.length + " files"));
   }
 
   // ---------------------------------------------------------------- sensitive topics
@@ -412,7 +521,7 @@
   // conversations: normalised list. opts.includeAssistant: also scan AI replies.
   // onProgress(done, total) is called periodically; analyze yields to the event loop between batches.
   async function analyze(conversations, opts) {
-    const o = Object.assign({ includeAssistant: false, onProgress: null }, opts || {});
+    const o = Object.assign({ includeAssistant: false, includeTools: true, onProgress: null }, opts || {});
     const values = new Map(); // value -> { kind, ruleId, label, preview, count, convs:Set }
     const topicTotals = Object.fromEntries(TOPICS.map((t) => [t.id, { id: t.id, label: t.label, count: 0, convs: new Set() }]));
     const convReports = [];
@@ -426,13 +535,13 @@
       for (let i = 0; i < c.messages.length; i++) {
         const m = c.messages[i];
         if (m.role === "user") userMessages++;
-        if (m.role !== "user" && !(o.includeAssistant && m.role === "assistant")) continue;
+        if (m.role !== "user" && !(o.includeAssistant && m.role === "assistant") && !(o.includeTools && m.role === "tool")) continue;
         scannedChars += m.text.length;
         const found = S.scan(m.text, SCRUB_OPTS);
         const { masked, spans } = maskMessage(m.text, found);
         found.forEach((f, k) => {
           const preview = S.preview(f);
-          hits.push({ kind: f.kind, ruleId: f.ruleId, label: f.label, preview, msg: i, role: m.role, snippet: excerpt(masked, spans[k][0], spans[k][1]) });
+          hits.push({ kind: f.kind, ruleId: f.ruleId, label: f.label, preview, msg: i, role: m.role, where: m.kind, tool: m.name, snippet: excerpt(masked, spans[k][0], spans[k][1]) });
           const key = f.kind + "\u0000" + f.value;
           let v = values.get(key);
           if (!v) values.set(key, (v = { kind: f.kind, ruleId: f.ruleId, label: f.label, preview, count: 0, convs: new Set() }));
@@ -499,10 +608,32 @@
 
   // Returns a deep copy of the original export JSON with secrets, identifiers and hidden text
   // replaced by Scrub placeholders (consistent across the whole file), plus the restore vault.
-  function redactExport(jsonText) {
-    const data = JSON.parse(jsonText.replace(/^﻿/, ""));
-    const vault = S.createVault();
+  function redactExport(jsonText, vaultIn) {
+    const vault = vaultIn || S.createVault();
     const red = (s) => (typeof s === "string" && s ? S.redact(s, SCRUB_OPTS, vault).text : s);
+    const walk = (v) => {
+      if (Array.isArray(v)) v.forEach((x, i) => (typeof x === "string" ? (v[i] = red(x)) : walk(x)));
+      else if (v && typeof v === "object") for (const k of Object.keys(v)) typeof v[k] === "string" ? (v[k] = red(v[k])) : walk(v[k]);
+    };
+    const t = jsonText.replace(/^\uFEFF/, "");
+    let data;
+    try {
+      data = JSON.parse(t);
+    } catch {
+      // JSONL (Claude Code transcripts): redact every string on every line, keep one object per line
+      const out = t.split(/\r?\n/).map((l) => {
+        if (!l.trim()) return l;
+        try {
+          const o = JSON.parse(l);
+          typeof o === "string" ? null : walk(o);
+          return JSON.stringify(typeof o === "string" ? red(o) : o);
+        } catch {
+          return red(l);
+        }
+      });
+      return { json: out.join("\n"), vault, jsonl: true };
+    }
+    if (data && !Array.isArray(data) && typeof data === "object" && (data.chat_messages || data.mapping)) data = [data];
     const shape = shapeOf(data);
     if (shape === "chatgpt") {
       for (const c of data) {
@@ -528,14 +659,9 @@
         p.prompt_template = red(p.prompt_template);
         for (const d of p.docs || []) d.content = red(d.content);
       }
-    } else {
-      (function walk(v) {
-        if (Array.isArray(v)) v.forEach((x, i) => (typeof x === "string" ? (v[i] = red(x)) : walk(x)));
-        else if (v && typeof v === "object") for (const k of Object.keys(v)) typeof v[k] === "string" ? (v[k] = red(v[k])) : walk(v[k]);
-      })(data);
-    }
+    } else walk(data);
     return { json: JSON.stringify(data), vault };
   }
 
-  return { load, loadFiles, listZip, readEntryText, isZip, parseJSONText, parseChatGPT, parseClaude, parseClaudeProjects, analyze, topicHits, redactExport, TOPICS };
+  return { load, loadFiles, listZip, readEntryText, isZip, parseJSONText, parseChatGPT, parseClaude, parseClaudeProjects, parseClaudeCode, EXPORT_PARTS, analyze, topicHits, redactExport, TOPICS };
 });
